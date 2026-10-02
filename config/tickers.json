@@ -1,0 +1,51 @@
+{
+    "selected_ticker": "ACN",
+    "selected_range": "1Y",
+    "tickers": [
+        {
+            "symbol": "AAPL",
+            "name": "Apple Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "MSFT",
+            "name": "Microsoft Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "NVDA",
+            "name": "NVIDIA Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "GOOGL",
+            "name": "Alphabet Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "AMZN",
+            "name": "Amazon.com Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "TSLA",
+            "name": "Tesla Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "META",
+            "name": "Meta Platforms Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "SU.PA",
+            "name": "Schneider Electric S.E.",
+            "enabled": true
+        },
+        {
+            "symbol": "ACN",
+            "name": "Accenture",
+            "enabled": true
+        }
+    ]
+}

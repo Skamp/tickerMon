@@ -1,0 +1,3 @@
+"""
+tickerMon application package.
+"""
