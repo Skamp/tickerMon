@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from app.models.ticker import TickerConfig
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,9 @@ class ConfigManager:
         """Saves current ticker list and selected preferences to JSON file."""
         try:
             self._ensure_config_dir()
+            existing = self._read_raw_config()
             data = {
+                **existing,
                 "selected_ticker": selected_ticker,
                 "selected_range": selected_range,
                 "tickers": [t.to_dict() for t in tickers],
@@ -54,6 +56,45 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
             return False
+
+    def load_enabled_filters(self) -> Optional[List[str]]:
+        """Returns configured filter visibility list, or None when no setting exists yet."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("enabled_filters")
+        except Exception as e:
+            logger.error(f"Error reading filter settings: {e}")
+            return None
+
+    def save_enabled_filters(self, enabled_filters: List[str]) -> bool:
+        """Saves which noise reduction filters are visible in the UI combo box."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["enabled_filters"] = list(enabled_filters)
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved filter settings to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save filter settings: {e}")
+            return False
+
+    def _read_raw_config(self) -> Dict[str, Any]:
+        if not self.config_path.exists():
+            return {}
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            logger.error(f"Error reading config file: {e}")
+            return {}
 
     def _create_default_config(self) -> Tuple[List[TickerConfig], str, str]:
         defaults = [

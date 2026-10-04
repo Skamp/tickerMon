@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
 
 from PySide6.QtCore import Qt, Signal, QSize, QRect
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.ticker import TickerSummary
+from app.models.trend import TrendBucket
 
 logger = logging.getLogger(__name__)
 
@@ -113,31 +114,70 @@ class TickerListWidget(QListWidget):
         self.setSelectionMode(QListWidget.SingleSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
+        self._summaries: List[TickerSummary] = []
+        self._trends: Dict[str, TrendBucket] = {}
+        self._swing_symbols: Set[str] = set()
+        self._active_buckets: Set[TrendBucket] = set()
+        self._swing_active: bool = False
+
         self.currentItemChanged.connect(self._on_item_changed)
 
-    def update_summaries(self, summaries: List[TickerSummary], select_symbol: Optional[str] = None) -> None:
+    def update_summaries(
+        self,
+        summaries: List[TickerSummary],
+        select_symbol: Optional[str] = None,
+        trends: Optional[Dict[str, TrendBucket]] = None,
+        swing_symbols: Optional[Set[str]] = None,
+    ) -> None:
         """Populates or updates list items with current summaries."""
+        self._summaries = list(summaries)
+        if trends is not None:
+            self._trends = dict(trends)
+        if swing_symbols is not None:
+            self._swing_symbols = set(swing_symbols)
+        self._repopulate(select_symbol)
+
+    def set_trend_filter(self, buckets: Set[TrendBucket], include_swing: bool = False) -> None:
+        """Shows tickers matching any active bucket or the swing flag; nothing active shows all."""
+        self._active_buckets = set(buckets)
+        self._swing_active = include_swing
+        self._repopulate(None)
+
+    def _repopulate(self, select_symbol: Optional[str]) -> None:
+        prev_symbol = self.get_selected_symbol()
+        target_sym = select_symbol.upper().strip() if select_symbol else prev_symbol
+        filtered = bool(self._active_buckets) or self._swing_active
+
         self.blockSignals(True)
         self.clear()
 
         selected_item = None
-        target_sym = select_symbol.upper().strip() if select_symbol else None
+        first_item = None
+        for summary in self._summaries:
+            if filtered:
+                in_trend = self._trends.get(summary.symbol) in self._active_buckets
+                in_swing = self._swing_active and summary.symbol in self._swing_symbols
+                if not (in_trend or in_swing):
+                    continue
 
-        for summary in summaries:
             item = QListWidgetItem()
             item.setData(Qt.UserRole, summary)
-            item.setText(summary.symbol)  # For searching / default filtering
+            item.setText(summary.symbol)
             self.addItem(item)
 
+            if first_item is None:
+                first_item = item
             if target_sym and summary.symbol.upper() == target_sym:
                 selected_item = item
 
+        chosen = selected_item or first_item
+        if chosen:
+            self.setCurrentItem(chosen)
         self.blockSignals(False)
 
-        if selected_item:
-            self.setCurrentItem(selected_item)
-        elif self.count() > 0:
-            self.setCurrentRow(0)
+        new_symbol = self.get_selected_symbol()
+        if new_symbol and new_symbol != prev_symbol:
+            self.ticker_selected.emit(new_symbol)
 
     def select_ticker(self, symbol: str) -> None:
         clean_sym = symbol.upper().strip()

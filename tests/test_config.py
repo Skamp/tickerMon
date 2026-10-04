@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from app.config.config_manager import ConfigManager
 from app.services.ticker_service import TickerService
+from app.services.noise_reduction import NoiseReductionAlgorithm
 from app.models.ticker import TickerConfig
 
 
@@ -45,6 +46,48 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(service.validate_ticker_symbol("^GSPC"))
         self.assertTrue(service.validate_ticker_symbol("EURUSD=X"))
         self.assertFalse(service.validate_ticker_symbol("INVALID SYMBOL WITH SPACES"))
+
+    def test_filter_settings_default_all_enabled(self):
+        self.assertIsNone(self.config_manager.load_enabled_filters())
+
+        service = TickerService(self.config_manager)
+        expected = [algorithm.value for algorithm in NoiseReductionAlgorithm if algorithm != NoiseReductionAlgorithm.NONE]
+        self.assertEqual(service.get_enabled_filters(), expected)
+
+    def test_filter_settings_roundtrip(self):
+        service = TickerService(self.config_manager)
+        enabled = [NoiseReductionAlgorithm.EMA.value, NoiseReductionAlgorithm.KALMAN.value]
+        self.assertTrue(service.set_enabled_filters(enabled))
+
+        reloaded = TickerService(self.config_manager)
+        self.assertEqual(reloaded.get_enabled_filters(), enabled)
+
+    def test_filter_settings_survive_ticker_save(self):
+        service = TickerService(self.config_manager)
+        enabled = [NoiseReductionAlgorithm.EMA50.value, NoiseReductionAlgorithm.RPD1.value]
+        service.set_enabled_filters(enabled)
+
+        ok, _ = service.add_ticker("IBM", "International Business Machines")
+        self.assertTrue(ok)
+
+        self.assertEqual(self.config_manager.load_enabled_filters(), enabled)
+
+        tickers, _, _ = self.config_manager.load_config()
+        self.assertTrue(any(t.symbol == "IBM" for t in tickers))
+
+    def test_filter_settings_ignores_unknown_values(self):
+        service = TickerService(self.config_manager)
+        service.set_enabled_filters(["NOT A REAL FILTER", NoiseReductionAlgorithm.HMA.value])
+
+        reloaded = TickerService(self.config_manager)
+        self.assertEqual(reloaded.get_enabled_filters(), [NoiseReductionAlgorithm.HMA.value])
+
+    def test_filter_settings_empty_list_disables_all(self):
+        service = TickerService(self.config_manager)
+        service.set_enabled_filters([])
+
+        reloaded = TickerService(self.config_manager)
+        self.assertEqual(reloaded.get_enabled_filters(), [])
 
 
 if __name__ == "__main__":

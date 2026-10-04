@@ -21,12 +21,14 @@ from PySide6.QtWidgets import (
 from app.models.time_range import TimeRange
 from app.models.ticker import TickerConfig, TickerSummary
 from app.services.ticker_service import TickerService
-from app.services.market_data_service import MarketDataService
+from app.services.market_data_service import MarketDataService, count_trend_buckets
 from app.services.sync_service import SyncService
 from app.services.noise_reduction import NoiseReductionAlgorithm, reduce_noise
 from app.ui.ticker_list import TickerListWidget
 from app.ui.chart_widget import StockChartWidget
 from app.ui.ticker_dialog import TickerAdminDialog
+from app.ui.filter_settings_dialog import FilterSettingsDialog
+from app.ui.trend_filter_bar import TrendFilterBar
 from app.ui.update_dialog import UpdateProgressDialog
 from app.workers.update_worker import UpdateWorker
 
@@ -115,11 +117,14 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        for algo in NoiseReductionAlgorithm:
-            self.combo_noise.addItem(algo.value, userData=algo)
-
+        self._rebuild_noise_combo()
         self.combo_noise.currentIndexChanged.connect(self._on_noise_algorithm_changed)
         toolbar_layout.addWidget(self.combo_noise)
+
+        self.btn_filter_settings = QPushButton("Filters…", toolbar_frame)
+        self.btn_filter_settings.setToolTip("Choose which filters appear in the Filter list")
+        self.btn_filter_settings.clicked.connect(self._on_open_filter_settings)
+        toolbar_layout.addWidget(self.btn_filter_settings)
 
         toolbar_layout.addSpacing(15)
 
@@ -168,6 +173,10 @@ class MainWindow(QMainWindow):
         sidebar_layout = QVBoxLayout(sidebar_frame)
         sidebar_layout.setContentsMargins(8, 8, 8, 8)
         sidebar_layout.setSpacing(6)
+
+        self.trend_filter_bar = TrendFilterBar(sidebar_frame)
+        self.trend_filter_bar.filter_changed.connect(self._on_trend_filter_changed)
+        sidebar_layout.addWidget(self.trend_filter_bar)
 
         sidebar_header = QLabel("MARKET WATCH", sidebar_frame)
         sidebar_header.setStyleSheet("font-size: 11px; font-weight: bold; color: #8b90a0; letter-spacing: 1px;")
@@ -265,9 +274,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_End), self, self.ticker_list.select_last)
 
     def _load_initial_state(self) -> None:
-        enabled_configs = self.ticker_service.get_enabled_tickers()
-        summaries = self.market_data_service.get_all_summaries(enabled_configs)
-
         target_ticker = self.ticker_service.selected_ticker
         target_range_str = self.ticker_service.selected_range
 
@@ -277,7 +283,27 @@ class MainWindow(QMainWindow):
                 btn.setChecked(True)
                 break
 
-        self.ticker_list.update_summaries(summaries, select_symbol=target_ticker)
+        self._refresh_ticker_list(select_symbol=target_ticker)
+
+    def _refresh_ticker_list(self, select_symbol: Optional[str] = None) -> None:
+        """Reloads sidebar summaries and trend bucket counts for the active time range."""
+        enabled_configs = self.ticker_service.get_enabled_tickers()
+        summaries = self.market_data_service.get_all_summaries(enabled_configs)
+        trends = self.market_data_service.get_trend_buckets(enabled_configs, self._active_range)
+        swing_symbols = self.market_data_service.get_swing_symbols(enabled_configs, self._active_range)
+        self.trend_filter_bar.set_counts(count_trend_buckets(trends), len(swing_symbols))
+        self.ticker_list.update_summaries(
+            summaries,
+            select_symbol=select_symbol,
+            trends=trends,
+            swing_symbols=swing_symbols,
+        )
+
+    def _on_trend_filter_changed(self) -> None:
+        self.ticker_list.set_trend_filter(
+            self.trend_filter_bar.active_trends(),
+            include_swing=self.trend_filter_bar.swing_active(),
+        )
 
     def _on_ticker_selected(self, symbol: str) -> None:
         """Fast offline chart update when selected ticker changes."""
@@ -348,6 +374,24 @@ class MainWindow(QMainWindow):
         red_x, red_y = reduce_noise(self._active_noise_algo, timestamps, prices)
         self.chart_widget.set_overlay_data(red_x, red_y)
 
+    def _rebuild_noise_combo(self) -> None:
+        """Repopulates the filter combo with only the enabled algorithms."""
+        current = self._active_noise_algo
+        enabled = set(self.ticker_service.get_enabled_filters())
+
+        self.combo_noise.blockSignals(True)
+        self.combo_noise.clear()
+        for algorithm in NoiseReductionAlgorithm:
+            if algorithm == NoiseReductionAlgorithm.NONE or algorithm.value in enabled:
+                self.combo_noise.addItem(algorithm.value, userData=algorithm)
+
+        index = self.combo_noise.findData(current)
+        if index < 0:
+            index = self.combo_noise.findData(NoiseReductionAlgorithm.NONE)
+            self._active_noise_algo = NoiseReductionAlgorithm.NONE
+        self.combo_noise.setCurrentIndex(index)
+        self.combo_noise.blockSignals(False)
+
     def _on_noise_algorithm_changed(self, index: int) -> None:
         algo = self.combo_noise.itemData(index)
         if algo:
@@ -414,6 +458,7 @@ class MainWindow(QMainWindow):
         if not btn:
             return
         self._active_range = btn.property("time_range")
+        self._refresh_ticker_list()
         selected_symbol = self.ticker_list.get_selected_symbol()
         if selected_symbol:
             self._on_ticker_selected(selected_symbol)
@@ -430,6 +475,17 @@ class MainWindow(QMainWindow):
         dlg = TickerAdminDialog(self.ticker_service, self)
         if dlg.exec() == TickerAdminDialog.Accepted:
             self._load_initial_state()
+            selected_symbol = self.ticker_list.get_selected_symbol()
+            if selected_symbol:
+                self._on_ticker_selected(selected_symbol)
+
+    def _on_open_filter_settings(self) -> None:
+        dlg = FilterSettingsDialog(self.ticker_service, self)
+        if dlg.exec() == FilterSettingsDialog.Accepted:
+            self._rebuild_noise_combo()
+            selected_symbol = self.ticker_list.get_selected_symbol()
+            if selected_symbol:
+                self._on_ticker_selected(selected_symbol)
 
     def _on_update_clicked(self) -> None:
         enabled_configs = self.ticker_service.get_enabled_tickers()
@@ -451,8 +507,6 @@ class MainWindow(QMainWindow):
     def _on_update_finished(self, success_count: int, fail_count: int) -> None:
         self.status_bar.showMessage(f"Update completed: {success_count} successful, {fail_count} failed.")
         curr_sym = self.ticker_list.get_selected_symbol()
-        enabled_configs = self.ticker_service.get_enabled_tickers()
-        summaries = self.market_data_service.get_all_summaries(enabled_configs)
-        self.ticker_list.update_summaries(summaries, select_symbol=curr_sym)
+        self._refresh_ticker_list(select_symbol=curr_sym)
         if curr_sym:
             self._on_ticker_selected(curr_sym)

@@ -1,13 +1,46 @@
 import logging
 from datetime import datetime
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Set
 
 from app.database.repositories import MarketDataRepository
 from app.models.price_data import PricePoint
 from app.models.ticker import TickerConfig, TickerSummary
 from app.models.time_range import TimeRange
+from app.models.trend import TrendBucket
 
 logger = logging.getLogger(__name__)
+
+TREND_CHANGE_THRESHOLD_PCT = 2.0
+SWING_RANGE_THRESHOLD = 0.10
+
+
+def classify_price_series(prices: List[float]) -> TrendBucket:
+    valid = [p for p in prices if p and p > 0]
+    if len(valid) < 2:
+        return TrendBucket.UNSURE
+
+    change_pct = (valid[-1] - valid[0]) / valid[0] * 100.0
+    if change_pct >= TREND_CHANGE_THRESHOLD_PCT:
+        return TrendBucket.RISE
+    if change_pct <= -TREND_CHANGE_THRESHOLD_PCT:
+        return TrendBucket.DOWN
+    return TrendBucket.LATERAL
+
+
+def is_swing_series(prices: List[float]) -> bool:
+    valid = [p for p in prices if p and p > 0]
+    if len(valid) < 2:
+        return False
+
+    low = min(valid)
+    return (max(valid) - low) / low >= SWING_RANGE_THRESHOLD
+
+
+def count_trend_buckets(trends: Dict[str, TrendBucket]) -> Dict[TrendBucket, int]:
+    counts = {bucket: 0 for bucket in TrendBucket}
+    for bucket in trends.values():
+        counts[bucket] += 1
+    return counts
 
 
 class MarketDataService:
@@ -72,6 +105,21 @@ class MarketDataService:
 
     def get_all_summaries(self, configs: List[TickerConfig]) -> List[TickerSummary]:
         return [self.get_ticker_summary(cfg) for cfg in configs]
+
+    def get_trend_bucket(self, symbol: str, time_range: TimeRange) -> TrendBucket:
+        _, prices, _ = self.get_chart_data(symbol, time_range)
+        return classify_price_series(prices)
+
+    def get_trend_buckets(self, configs: List[TickerConfig], time_range: TimeRange) -> Dict[str, TrendBucket]:
+        return {cfg.symbol: self.get_trend_bucket(cfg.symbol, time_range) for cfg in configs}
+
+    def get_swing_symbols(self, configs: List[TickerConfig], time_range: TimeRange) -> Set[str]:
+        symbols: Set[str] = set()
+        for cfg in configs:
+            _, prices, _ = self.get_chart_data(cfg.symbol, time_range)
+            if is_swing_series(prices):
+                symbols.add(cfg.symbol)
+        return symbols
 
     def get_chart_data(self, symbol: str, time_range: TimeRange) -> Tuple[List[float], List[float], List[str]]:
         """

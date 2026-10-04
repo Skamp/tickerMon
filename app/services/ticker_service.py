@@ -3,6 +3,7 @@ import logging
 from typing import List, Tuple, Optional
 from app.config.config_manager import ConfigManager
 from app.models.ticker import TickerConfig
+from app.services.noise_reduction import NoiseReductionAlgorithm
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,16 @@ class TickerService:
         self.selected_ticker = selected_ticker
         self.selected_range = selected_range
         self._save()
+
+    def get_enabled_filters(self) -> List[str]:
+        stored = self.config_manager.load_enabled_filters()
+        if stored is None or not isinstance(stored, list):
+            return [algorithm.value for algorithm in NoiseReductionAlgorithm if algorithm != NoiseReductionAlgorithm.NONE]
+        known = {algorithm.value for algorithm in NoiseReductionAlgorithm}
+        return [value for value in stored if value in known and value != NoiseReductionAlgorithm.NONE.value]
+
+    def set_enabled_filters(self, enabled_filters: List[str]) -> bool:
+        return self.config_manager.save_enabled_filters(enabled_filters)
 
     def _save(self) -> None:
         self.config_manager.save_config(self.tickers, self.selected_ticker, self.selected_range)
