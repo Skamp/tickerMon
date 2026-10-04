@@ -73,6 +73,8 @@ The application enforces strict separation of concerns through a layered archite
      ```bash
      source activate.sh
      # or
+     source .venv/bin/activate
+     # or (Windows venv on Linux)
      source .venv/Scripts/activate
      ```
    - **Windows Command Prompt**:
@@ -85,7 +87,7 @@ The application enforces strict separation of concerns through a layered archite
      ```
 
 4. **Install Dependencies**:
-   ```cmd
+   ```bash
    pip install -r requirements.txt
    ```
 
@@ -129,10 +131,16 @@ Sample `config/tickers.json`:
 
 ## 🏃 Running the Application
 
-Launch the application using:
+Launch the application using (with venv activated):
 
-```cmd
+```bash
 python main.py
+```
+
+or
+
+```bash
+.venv/Scripts/python.exe main.py
 ```
 
 Directories `config/`, `data/`, and `logs/` will be created automatically if they do not exist.
@@ -190,9 +198,9 @@ Tracks synchronization timestamps and download status for each ticker symbol.
 
 ## 🧪 Running Unit Tests
 
-Run the unit test suite using Python's `unittest` module:
+Run the unit test suite using Python's `unittest` module (with venv activated):
 
-```cmd
+```bash
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
