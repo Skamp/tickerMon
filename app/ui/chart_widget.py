@@ -118,6 +118,9 @@ class StockChartWidget(QWidget):
         self._overlay_x: List[float] = []
         self._overlay_y: List[float] = []
 
+        # Fit-view bounds (x_lo, x_hi, y_lo, y_hi) captured after each auto-fit
+        self._view_bounds: Optional[Tuple[float, float, float, float]] = None
+
         # Connect mouse move event for crosshair
         self.plot_widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
@@ -134,6 +137,7 @@ class StockChartWidget(QWidget):
         self._date_labels = date_labels
 
         if not timestamps or not prices:
+            self._view_bounds = None
             self.show_empty_state(True)
             return
 
@@ -155,15 +159,40 @@ class StockChartWidget(QWidget):
         # Set data to curve
         self.curve.setData(self._x_data, self._y_data)
 
-        # Enable auto range with padding
-        y_min, y_max = min(prices), max(prices)
+        self._fit_view_to_data()
+
+    def _fit_view_to_data(self) -> None:
+        """Auto-fits the view to data bounds and locks zoom/pan limits to that fit view."""
+        if not self._x_data or not self._y_data:
+            return
+
+        y_min, y_max = min(self._y_data), max(self._y_data)
         if self._overlay_y:
             y_min = min(y_min, min(self._overlay_y))
             y_max = max(y_max, max(self._overlay_y))
 
         padding = (y_max - y_min) * 0.08 if y_max > y_min else y_max * 0.05
+
+        vb = self.plot_item.vb
+        vb.setLimits(xMin=None, xMax=None, yMin=None, yMax=None, maxXRange=None, maxYRange=None)
         self.plot_item.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
         self.plot_item.setYRange(y_min - padding, y_max + padding)
+        vb.updateAutoRange()
+
+        x_lo, x_hi = vb.viewRange()[0]
+        y_lo, y_hi = vb.viewRange()[1]
+        if x_hi <= x_lo or y_hi <= y_lo:
+            return
+
+        self._view_bounds = (x_lo, x_hi, y_lo, y_hi)
+        vb.setLimits(
+            xMin=x_lo,
+            xMax=x_hi,
+            maxXRange=x_hi - x_lo,
+            yMin=y_lo,
+            yMax=y_hi,
+            maxYRange=y_hi - y_lo,
+        )
 
     def set_overlay_data(self, timestamps: List[float], prices: List[float]) -> None:
         """Sets and displays a secondary noise-reduced graph curve in Amber Gold."""
@@ -176,12 +205,14 @@ class StockChartWidget(QWidget):
 
         self.overlay_curve.setData(timestamps, prices)
         self.overlay_curve.setVisible(True)
+        self._fit_view_to_data()
 
     def clear_overlay(self) -> None:
         """Clears and hides the secondary overlay curve."""
         self._overlay_x = []
         self._overlay_y = []
         self.overlay_curve.setVisible(False)
+        self._fit_view_to_data()
 
     def show_empty_state(self, visible: bool, message: Optional[str] = None) -> None:
         """Toggles display between plot widget and empty state message."""
@@ -195,9 +226,14 @@ class StockChartWidget(QWidget):
             self.plot_widget.show()
 
     def reset_view(self) -> None:
-        """Resets zoom and pan to fit data bounds."""
-        if self._x_data and self._y_data:
-            self.plot_item.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
+        """Resets zoom and pan to the captured fit view for the current range."""
+        if self._view_bounds is None:
+            self._fit_view_to_data()
+            return
+
+        x_lo, x_hi, y_lo, y_hi = self._view_bounds
+        self.plot_item.setXRange(x_lo, x_hi, padding=0)
+        self.plot_item.setYRange(y_lo, y_hi, padding=0)
 
     def _on_mouse_moved(self, pos) -> None:
         if not self._x_data or not self._y_data:
