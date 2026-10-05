@@ -1,9 +1,15 @@
 import re
 import logging
-from typing import List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 from app.config.config_manager import ConfigManager
 from app.models.ticker import TickerConfig
 from app.services.noise_reduction import NoiseReductionAlgorithm
+from app.services.swing_detection import (
+    SwingAlgorithm,
+    SwingRangeMode,
+    default_swing_params,
+    normalize_swing_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +98,72 @@ class TickerService:
 
     def set_enabled_filters(self, enabled_filters: List[str]) -> bool:
         return self.config_manager.save_enabled_filters(enabled_filters)
+
+    def get_enabled_swing_algorithms(self) -> List[str]:
+        stored = self.config_manager.load_enabled_swing_algorithms()
+        if stored is None or not isinstance(stored, list):
+            return [algorithm.value for algorithm in SwingAlgorithm]
+        known = {algorithm.value for algorithm in SwingAlgorithm}
+        enabled = [value for value in stored if value in known]
+        if not enabled:
+            return [SwingAlgorithm.RANGE.value]
+        return enabled
+
+    def set_enabled_swing_algorithms(self, enabled_algorithms: List[str]) -> bool:
+        cleaned = list(dict.fromkeys(enabled_algorithms))
+        if not cleaned:
+            cleaned = [SwingAlgorithm.RANGE.value]
+        return self.config_manager.save_enabled_swing_algorithms(cleaned)
+
+    def get_swing_params(self, algorithm: SwingAlgorithm) -> Dict[str, float]:
+        stored = self.config_manager.load_swing_params()
+        raw: Optional[Dict[str, Any]] = None
+        if isinstance(stored, dict):
+            candidate = stored.get(algorithm.value)
+            if isinstance(candidate, dict):
+                raw = candidate
+        return normalize_swing_params(algorithm, raw)
+
+    def get_all_swing_params(self) -> Dict[str, Dict[str, float]]:
+        return {
+            algorithm.value: self.get_swing_params(algorithm)
+            for algorithm in SwingAlgorithm
+        }
+
+    def set_swing_params(self, params: Dict[str, Dict[str, float]]) -> bool:
+        normalized: Dict[str, Dict[str, float]] = {}
+        for algorithm in SwingAlgorithm:
+            candidate = params.get(algorithm.value)
+            source = candidate if isinstance(candidate, dict) else default_swing_params(algorithm)
+            normalized[algorithm.value] = normalize_swing_params(algorithm, source)
+        return self.config_manager.save_swing_params(normalized)
+
+    def get_swing_range_settings(self) -> Dict[str, Any]:
+        stored = self.config_manager.load_swing_range_settings()
+        return self._normalize_swing_range_settings(stored if isinstance(stored, dict) else {})
+
+    def set_swing_range_settings(self, settings: Dict[str, Any]) -> bool:
+        return self.config_manager.save_swing_range_settings(
+            self._normalize_swing_range_settings(settings)
+        )
+
+    @staticmethod
+    def _normalize_swing_range_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+        mode = SwingRangeMode.from_str(str(settings.get("mode", "")))
+        value = TickerService._clamp_swing_range_value(settings.get("value", 0))
+        value_max = TickerService._clamp_swing_range_value(settings.get("value_max", 0))
+        unit = "weeks"
+        if mode == SwingRangeMode.DURATION_WINDOW and 0 < value_max < value:
+            value, value_max = value_max, value
+        return {"mode": mode.value, "value": value, "value_max": value_max, "unit": unit}
+
+    @staticmethod
+    def _clamp_swing_range_value(raw: Any) -> int:
+        try:
+            value = int(round(float(raw)))
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(value, 520))
 
     def _save(self) -> None:
         self.config_manager.save_config(self.tickers, self.selected_ticker, self.selected_range)

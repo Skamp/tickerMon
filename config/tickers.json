@@ -1,5 +1,5 @@
 {
-    "selected_ticker": "ACN",
+    "selected_ticker": "TSLA",
     "selected_range": "1Y",
     "tickers": [
         {
@@ -47,5 +47,143 @@
             "name": "Accenture",
             "enabled": true
         }
-    ]
+    ],
+    "enabled_filters": [
+        "QuadTree Reduction",
+        "Exponential Moving Average (EMA)",
+        "Exponential MA (EMA 50)",
+        "Exponential MA (EMA 200)",
+        "Savitzky-Golay Filter",
+        "Ramer-Douglas-Peucker (RDP)",
+        "Ramer-Douglas-Peucker (Loose)",
+        "Ramer-Douglas-Peucker (Tight)",
+        "Double EMA (DEMA)",
+        "Triple EMA (TEMA)",
+        "Hull Moving Average (HMA)"
+    ],
+    "enabled_swing_algorithms": [
+        "Min-Max Range (10%)",
+        "ZigZag",
+        "Williams Fractals",
+        "Pivot Window (find_peaks)",
+        "Swing Index / ASI (Wilder)",
+        "Parabolic SAR",
+        "Keltner Channels"
+    ],
+    "swing_algorithm_params": {
+        "Min-Max Range (10%)": {
+            "min_swing_pct": 20.0
+        },
+        "ZigZag": {
+            "min_swing_pct": 10.0,
+            "threshold_pct": 5.0,
+            "atr_multiple": 5.0
+        },
+        "Williams Fractals": {
+            "min_swing_pct": 10.0,
+            "order": 2.0
+        },
+        "Pivot Window (find_peaks)": {
+            "min_swing_pct": 10.0,
+            "window": 5.0,
+            "prominence_ratio": 0.05
+        },
+        "Swing Index / ASI (Wilder)": {
+            "min_swing_pct": 20.0,
+            "limit_factor": 3.0
+        },
+        "Parabolic SAR": {
+            "min_swing_pct": 20.0,
+            "af_step": 0.02,
+            "af_max": 0.2
+        },
+        "SuperTrend": {
+            "min_swing_pct": 20.0,
+            "period": 10.0,
+            "mult": 3.0
+        },
+        "Chandelier Exit": {
+            "min_swing_pct": 20.0,
+            "period": 10.0,
+            "mult": 3.0
+        },
+        "Donchian Channels": {
+            "min_swing_pct": 10.0,
+            "period": 20.0
+        },
+        "Heikin-Ashi": {
+            "min_swing_pct": 10.0,
+            "order": 2.0
+        },
+        "RSI": {
+            "min_swing_pct": 10.0,
+            "period": 14.0,
+            "upper": 70.0,
+            "lower": 30.0
+        },
+        "Stochastic": {
+            "min_swing_pct": 10.0,
+            "period": 14.0,
+            "smooth": 3.0,
+            "upper": 80.0,
+            "lower": 20.0
+        },
+        "MACD": {
+            "min_swing_pct": 10.0,
+            "fast": 12.0,
+            "slow": 26.0,
+            "signal": 9.0
+        },
+        "CCI": {
+            "min_swing_pct": 10.0,
+            "period": 20.0,
+            "upper": 100.0,
+            "lower": -100.0
+        },
+        "Bollinger Bands": {
+            "min_swing_pct": 10.0,
+            "period": 20.0,
+            "mult": 2.0
+        },
+        "Keltner Channels": {
+            "min_swing_pct": 30.0,
+            "period": 10.0,
+            "mult": 3.0,
+            "atr_period": 10.0
+        },
+        "Change-Point (CUSUM / PELT / BOCPD)": {
+            "min_swing_pct": 10.0,
+            "min_size": 5.0,
+            "penalty_factor": 3.0,
+            "cusum_threshold": 0.0
+        },
+        "Kalman Filter": {
+            "min_swing_pct": 10.0,
+            "process_noise": 0.0001,
+            "measurement_noise": 0.5
+        },
+        "Savitzky-Golay Filter": {
+            "min_swing_pct": 10.0,
+            "window_size": 7.0,
+            "polyorder": 2.0
+        },
+        "Hilbert Transform": {
+            "min_swing_pct": 10.0
+        },
+        "Wavelets": {
+            "min_swing_pct": 10.0,
+            "level": 0.0
+        },
+        "Hidden Markov Model": {
+            "min_swing_pct": 10.0,
+            "n_states": 3.0,
+            "iterations": 8.0
+        }
+    },
+    "swing_range_settings": {
+        "mode": "Duration window (both bounds)",
+        "value": 2,
+        "value_max": 4,
+        "unit": "weeks"
+    }
 }

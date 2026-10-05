@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPen, QBrush, QLinearGradient
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGraphicsRectItem
 
 import pyqtgraph as pg
 
@@ -85,6 +85,31 @@ class StockChartWidget(QWidget):
         self.overlay_curve = self.plot_item.plot(pen=self.overlay_pen)
         self.overlay_curve.setVisible(False)
 
+        # Swing Overlay: zigzag line + pivot markers (Violet stroke)
+        swing_color = QColor("#e040fb")
+        self.swing_pen = QPen(swing_color)
+        self.swing_pen.setWidthF(1.6)
+        self.swing_pen.setCosmetic(True)
+        self.swing_line = self.plot_item.plot(pen=self.swing_pen)
+        self.swing_line.setVisible(False)
+
+        self.swing_scatter = pg.ScatterPlotItem(
+            size=7,
+            brush=pg.mkBrush(swing_color),
+            pen=pg.mkPen(QColor("#121318"), width=1.0),
+        )
+        self.plot_item.addItem(self.swing_scatter, ignoreBounds=True)
+        self.swing_scatter.setVisible(False)
+
+        self.swing_text = pg.TextItem(
+            text="", anchor=(0, 0), color="#e040fb", fill=pg.mkBrush("#1a1c24f0")
+        )
+        self.plot_item.addItem(self.swing_text, ignoreBounds=True)
+        self.swing_text.setVisible(False)
+
+        # Yellow highlight bands marking each detected swing leg
+        self._swing_bands: List[QGraphicsRectItem] = []
+
         # Sleek Crosshair lines (0.8px width)
         crosshair_pen = QPen(QColor("#454b61"))
         crosshair_pen.setWidthF(0.8)
@@ -123,6 +148,9 @@ class StockChartWidget(QWidget):
 
         # Connect mouse move event for crosshair
         self.plot_widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
+
+        # Keep the swing parameter text anchored to the top-left of the visible view
+        self.plot_item.vb.sigRangeChanged.connect(self._position_swing_text)
 
     def set_data(
         self,
@@ -213,6 +241,131 @@ class StockChartWidget(QWidget):
         self._overlay_y = []
         self.overlay_curve.setVisible(False)
         self._fit_view_to_data()
+
+    def set_swing_overlay(
+        self,
+        timestamps: List[float],
+        prices: List[float],
+        pivots: List[int],
+        title: str = "",
+        details: str = "",
+        legs: Optional[List[Tuple[int, int]]] = None,
+    ) -> None:
+        """Draws the detected swing pivots as a violet zigzag line with markers.
+
+        ``legs`` are ``(start, end)`` pivot index pairs; each one is marked
+        with a semi-transparent yellow band spanning its time range and price
+        range. When omitted, every consecutive pivot pair forms a leg.
+        ``title`` and ``details`` (typically the algorithm name, its
+        configuration parameters and the swing range) are rendered as a boxed
+        annotation in the top-left corner of the plot.
+        """
+        valid_pivots = [
+            int(i) for i in pivots if 0 <= int(i) < len(timestamps) and int(i) < len(prices)
+        ]
+        if legs is None:
+            legs = list(zip(valid_pivots, valid_pivots[1:]))
+        valid_legs = [
+            (int(a), int(b))
+            for a, b in legs
+            if 0 <= int(a) <= int(b) < len(timestamps) and int(b) < len(prices)
+        ]
+
+        if valid_legs:
+            xs: List[float] = []
+            ys: List[float] = []
+            previous_end: Optional[int] = None
+            for start, end in valid_legs:
+                if previous_end is None:
+                    xs.append(timestamps[start])
+                    ys.append(prices[start])
+                elif start != previous_end:
+                    xs.append(float("nan"))
+                    ys.append(float("nan"))
+                    xs.append(timestamps[start])
+                    ys.append(prices[start])
+                xs.append(timestamps[end])
+                ys.append(prices[end])
+                previous_end = end
+            self.swing_line.setData(xs, ys)
+            self.swing_line.setVisible(True)
+        else:
+            self.swing_line.setVisible(False)
+            self.swing_line.setData([], [])
+
+        if valid_pivots:
+            self.swing_scatter.setData(
+                [timestamps[i] for i in valid_pivots],
+                [prices[i] for i in valid_pivots],
+            )
+            self.swing_scatter.setVisible(True)
+        else:
+            self.swing_scatter.setVisible(False)
+            self.swing_scatter.setData([], [])
+
+        self._set_swing_bands(timestamps, prices, valid_legs)
+
+        text = "\n".join(part for part in (title, details) if part)
+        if text:
+            self.swing_text.setText(text)
+            self.swing_text.setVisible(True)
+            self._position_swing_text()
+        else:
+            self.swing_text.setVisible(False)
+
+    def _set_swing_bands(
+        self,
+        timestamps: List[float],
+        prices: List[float],
+        legs: List[Tuple[int, int]],
+    ) -> None:
+        self._clear_swing_bands()
+        band_pen = QPen(QColor(255, 235, 59, 170))
+        band_pen.setWidthF(0.8)
+        band_pen.setCosmetic(True)
+        band_brush = QBrush(QColor(255, 235, 59, 40))
+        for start, end in legs:
+            x0 = float(timestamps[start])
+            x1 = float(timestamps[end])
+            segment = prices[start: end + 1]
+            if x1 <= x0 or not segment:
+                continue
+            y0 = float(min(segment))
+            y1 = float(max(segment))
+            if y1 <= y0:
+                y1 = y0 + max(abs(y0) * 0.001, 0.01)
+            band = QGraphicsRectItem(x0, y0, x1 - x0, y1 - y0)
+            band.setPen(band_pen)
+            band.setBrush(band_brush)
+            band.setZValue(-4)
+            self.plot_item.addItem(band, ignoreBounds=True)
+            self._swing_bands.append(band)
+
+    def _clear_swing_bands(self) -> None:
+        for band in self._swing_bands:
+            try:
+                self.plot_item.removeItem(band)
+            except Exception:
+                pass
+        self._swing_bands = []
+
+    def clear_swing_overlay(self) -> None:
+        """Clears and hides the swing overlay line, markers, bands and annotation."""
+        self.swing_line.setVisible(False)
+        self.swing_line.setData([], [])
+        self.swing_scatter.setVisible(False)
+        self.swing_scatter.setData([], [])
+        self._clear_swing_bands()
+        self.swing_text.setVisible(False)
+
+    def _position_swing_text(self, *args) -> None:
+        if not self.swing_text.isVisible():
+            return
+        x_lo, x_hi = self.plot_item.vb.viewRange()[0]
+        y_lo, y_hi = self.plot_item.vb.viewRange()[1]
+        if x_hi <= x_lo or y_hi <= y_lo:
+            return
+        self.swing_text.setPos(x_lo + (x_hi - x_lo) * 0.02, y_hi - (y_hi - y_lo) * 0.05)
 
     def show_empty_state(self, visible: bool, message: Optional[str] = None) -> None:
         """Toggles display between plot widget and empty state message."""

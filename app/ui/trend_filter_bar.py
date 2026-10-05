@@ -108,6 +108,11 @@ class TrendFilterBar(QWidget):
         self._all_button.setText(f"All {sum(counts.values())}")
         self._swing_button.setText(f"Swing {swing_count}")
 
+    def set_swing_algorithm(self, algorithm_name: str) -> None:
+        self._swing_button.setToolTip(
+            f"Show tickers flagged as swinging by '{algorithm_name}' (moves of at least 10%)"
+        )
+
     def active_trends(self) -> Set[TrendBucket]:
         return {bucket for bucket, button in self._buttons.items() if button.isChecked()}
 

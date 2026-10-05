@@ -84,6 +84,89 @@ class ConfigManager:
             logger.error(f"Failed to save filter settings: {e}")
             return False
 
+    def load_enabled_swing_algorithms(self) -> Optional[List[str]]:
+        """Returns configured swing algorithm visibility list, or None when no setting exists yet."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("enabled_swing_algorithms")
+        except Exception as e:
+            logger.error(f"Error reading swing algorithm settings: {e}")
+            return None
+
+    def save_enabled_swing_algorithms(self, enabled_algorithms: List[str]) -> bool:
+        """Saves which swing algorithms are visible in the UI combo box."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["enabled_swing_algorithms"] = list(enabled_algorithms)
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved swing algorithm settings to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save swing algorithm settings: {e}")
+            return False
+
+    def load_swing_params(self) -> Optional[Dict[str, Dict[str, float]]]:
+        """Returns per-algorithm swing parameters keyed by SwingAlgorithm value, or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            params = data.get("swing_algorithm_params")
+            return params if isinstance(params, dict) else None
+        except Exception as e:
+            logger.error(f"Error reading swing algorithm parameters: {e}")
+            return None
+
+    def save_swing_params(self, params: Dict[str, Dict[str, float]]) -> bool:
+        """Saves per-algorithm swing parameters keyed by SwingAlgorithm value."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["swing_algorithm_params"] = params
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved swing algorithm parameters to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save swing algorithm parameters: {e}")
+            return False
+
+    def load_swing_range_settings(self) -> Optional[Dict[str, Any]]:
+        """Returns the swing range filter settings, or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            settings = data.get("swing_range_settings")
+            return settings if isinstance(settings, dict) else None
+        except Exception as e:
+            logger.error(f"Error reading swing range settings: {e}")
+            return None
+
+    def save_swing_range_settings(self, settings: Dict[str, Any]) -> bool:
+        """Saves the swing range filter settings."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["swing_range_settings"] = settings
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved swing range settings to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save swing range settings: {e}")
+            return False
+
     def _read_raw_config(self) -> Dict[str, Any]:
         if not self.config_path.exists():
             return {}

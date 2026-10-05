@@ -1,4 +1,5 @@
 import gc
+import math
 import tempfile
 import unittest
 from unittest.mock import MagicMock
@@ -13,6 +14,7 @@ from app.services.market_data_service import (
     count_trend_buckets,
     is_swing_series,
 )
+from app.services.swing_detection import SwingAlgorithm
 from app.services.sync_service import SyncService
 from app.services.yahoo_service import YahooService
 from app.models.ticker import TickerConfig
@@ -130,6 +132,19 @@ class TestMarketData(unittest.TestCase):
         }, index=dates)
         self.repo.upsert_price_data(symbol, df)
 
+    def _seed_closes(self, symbol: str, closes) -> None:
+        end_date = pd.Timestamp.now().normalize()
+        dates = pd.date_range(end=end_date, periods=len(closes), freq="D")
+        df = pd.DataFrame({
+            "Open": closes,
+            "High": closes,
+            "Low": closes,
+            "Close": closes,
+            "Adj Close": closes,
+            "Volume": [1000] * len(closes),
+        }, index=dates)
+        self.repo.upsert_price_data(symbol, df)
+
     def test_get_trend_buckets(self):
         self._seed_series("AAA", 100.0, 130.0)
         self._seed_series("BBB", 100.0, 60.0)
@@ -172,6 +187,191 @@ class TestMarketData(unittest.TestCase):
 
         buckets = self.market_data_service.get_trend_buckets(configs, TimeRange.ONE_YEAR)
         self.assertEqual(buckets["SWG"], TrendBucket.RISE, "swing overlaps with trend buckets")
+
+    def test_get_swing_symbols_with_algorithm(self):
+        zigzag_series = [100.0, 106.0, 100.5, 109.0, 103.5, 113.0]
+        self._seed_closes("ZZ", zigzag_series)
+
+        configs = [TickerConfig("ZZ", "ZigZag Case", True)]
+
+        legacy = self.market_data_service.get_swing_symbols(configs, TimeRange.ONE_YEAR)
+        zigzag = self.market_data_service.get_swing_symbols(configs, TimeRange.ONE_YEAR, SwingAlgorithm.ZIGZAG)
+
+        self.assertEqual(legacy, {"ZZ"})
+        self.assertEqual(zigzag, set())
+
+    def test_detect_swing_pivots_range_includes_low_and_high(self):
+        closes = [100.0, 104.0, 112.0, 108.0, 95.0, 101.0, 118.0, 110.0]
+        self._seed_closes("PVT", closes)
+        _, prices, _ = self.market_data_service.get_chart_data("PVT", TimeRange.ONE_YEAR)
+
+        pivots = self.market_data_service.detect_swing_pivots(
+            "PVT", TimeRange.ONE_YEAR, prices, SwingAlgorithm.RANGE
+        )
+
+        self.assertEqual(pivots, sorted(set(pivots)))
+        self.assertIn(prices.index(min(prices)), pivots)
+        self.assertIn(prices.index(max(prices)), pivots)
+        self.assertIn(0, pivots)
+        self.assertIn(len(prices) - 1, pivots)
+
+    def test_detect_swing_pivots_with_algorithm_and_params(self):
+        zigzag_series = [100.0, 106.0, 100.5, 109.0, 103.5, 113.0, 105.0, 118.0]
+        self._seed_closes("PVT2", zigzag_series)
+        _, prices, _ = self.market_data_service.get_chart_data("PVT2", TimeRange.ONE_YEAR)
+
+        loose = self.market_data_service.detect_swing_pivots(
+            "PVT2", TimeRange.ONE_YEAR, prices, SwingAlgorithm.ZIGZAG,
+            params={"threshold_pct": 40.0},
+        )
+        strict = self.market_data_service.detect_swing_pivots(
+            "PVT2", TimeRange.ONE_YEAR, prices, SwingAlgorithm.ZIGZAG,
+            params={"threshold_pct": 2.0},
+        )
+
+        for pivots in (loose, strict):
+            self.assertEqual(pivots, sorted(set(pivots)))
+            self.assertTrue(all(0 <= i < len(prices) for i in pivots))
+        self.assertLessEqual(len(loose), len(strict))
+
+    def test_detect_swing_pivots_empty_prices(self):
+        pivots = self.market_data_service.detect_swing_pivots(
+            "MISSING", TimeRange.ONE_YEAR, [], SwingAlgorithm.RSI
+        )
+        self.assertEqual(pivots, [])
+
+    def _seed_swingy_series(self, symbol: str, periods: int = 120) -> None:
+        closes = [100.0 + 30.0 * math.sin(i / 3.0) for i in range(periods)]
+        self._seed_closes(symbol, closes)
+
+    def test_get_swing_symbols_with_range_settings(self):
+        self._seed_swingy_series("RSW")
+        configs = [TickerConfig("RSW", "Range Case", True)]
+        params = {"threshold_pct": 2.0}
+
+        unfiltered = self.market_data_service.get_swing_symbols(
+            configs, TimeRange.ONE_YEAR, SwingAlgorithm.ZIGZAG, params=params
+        )
+        self.assertEqual(unfiltered, {"RSW"})
+
+        min_8_weeks = self.market_data_service.get_swing_symbols(
+            configs,
+            TimeRange.ONE_YEAR,
+            SwingAlgorithm.ZIGZAG,
+            params=params,
+            range_settings={"mode": "Minimum duration", "value": 8, "value_max": 0, "unit": "weeks"},
+        )
+        self.assertEqual(min_8_weeks, set())
+
+        min_1_week = self.market_data_service.get_swing_symbols(
+            configs,
+            TimeRange.ONE_YEAR,
+            SwingAlgorithm.ZIGZAG,
+            params=params,
+            range_settings={"mode": "Minimum duration", "value": 1, "value_max": 0, "unit": "weeks"},
+        )
+        self.assertEqual(min_1_week, {"RSW"})
+
+    def test_get_swing_symbols_with_lookback_range(self):
+        self._seed_swingy_series("LBW")
+        configs = [TickerConfig("LBW", "Lookback Case", True)]
+        params = {"threshold_pct": 2.0}
+
+        recent = self.market_data_service.get_swing_symbols(
+            configs,
+            TimeRange.ONE_YEAR,
+            SwingAlgorithm.ZIGZAG,
+            params=params,
+            range_settings={"mode": "Lookback window", "value": 1, "value_max": 0, "unit": "months"},
+        )
+        self.assertEqual(recent, {"LBW"})
+
+        timestamps, prices, _ = self.market_data_service.get_chart_data("LBW", TimeRange.ONE_YEAR)
+        _, legs_week = self.market_data_service.detect_swing_overlay(
+            "LBW",
+            TimeRange.ONE_YEAR,
+            prices,
+            timestamps,
+            SwingAlgorithm.ZIGZAG,
+            params,
+            {"mode": "Lookback window", "value": 1, "value_max": 0, "unit": "weeks"},
+        )
+        _, legs_month = self.market_data_service.detect_swing_overlay(
+            "LBW",
+            TimeRange.ONE_YEAR,
+            prices,
+            timestamps,
+            SwingAlgorithm.ZIGZAG,
+            params,
+            {"mode": "Lookback window", "value": 1, "value_max": 0, "unit": "months"},
+        )
+        self.assertLessEqual(len(legs_week), len(legs_month))
+        for start, end in legs_week:
+            self.assertLessEqual(timestamps[end] - timestamps[start], 7 * 86400 + 1)
+
+    def test_detect_swing_overlay_returns_legs(self):
+        self._seed_swingy_series("OVL")
+        timestamps, prices, _ = self.market_data_service.get_chart_data("OVL", TimeRange.ONE_YEAR)
+        params = {"threshold_pct": 2.0}
+
+        pivots, legs = self.market_data_service.detect_swing_overlay(
+            "OVL",
+            TimeRange.ONE_YEAR,
+            prices,
+            timestamps,
+            SwingAlgorithm.ZIGZAG,
+            params,
+            None,
+        )
+        self.assertGreater(len(legs), 1)
+        self.assertEqual(sorted({i for leg in legs for i in leg}), pivots)
+        for start, end in legs:
+            self.assertLess(start, end)
+
+        filtered_pivots, filtered_legs = self.market_data_service.detect_swing_overlay(
+            "OVL",
+            TimeRange.ONE_YEAR,
+            prices,
+            timestamps,
+            SwingAlgorithm.ZIGZAG,
+            params,
+            {"mode": "Minimum duration", "value": 8, "value_max": 0, "unit": "weeks"},
+        )
+        self.assertEqual(filtered_legs, [])
+        self.assertEqual(filtered_pivots, [])
+
+    def test_chart_ohlcv_alignment(self):
+        self._seed_series("ALGN", 100.0, 140.0)
+
+        _, prices, _ = self.market_data_service.get_chart_data("ALGN", TimeRange.ONE_YEAR)
+        opens, highs, lows = self.market_data_service.get_chart_ohlcv("ALGN", TimeRange.ONE_YEAR)
+
+        self.assertEqual(len(opens), len(prices))
+        self.assertEqual(len(highs), len(prices))
+        self.assertEqual(len(lows), len(prices))
+        for open_, high, low, price in zip(opens, highs, lows, prices):
+            self.assertGreaterEqual(high, max(open_, price))
+            self.assertLessEqual(low, min(open_, price))
+
+    def test_chart_ohlcv_scales_to_adjusted_close(self):
+        dates = pd.date_range(end=pd.Timestamp.now().normalize(), periods=3, freq="D")
+        df = pd.DataFrame({
+            "Open": [100.0, 101.0, 102.0],
+            "High": [105.0, 106.0, 107.0],
+            "Low": [95.0, 96.0, 97.0],
+            "Close": [100.0, 101.0, 102.0],
+            "Adj Close": [50.0, 50.5, 51.0],
+            "Volume": [1000, 1000, 1000],
+        }, index=dates)
+        self.repo.upsert_price_data("ADJ", df)
+
+        _, prices, _ = self.market_data_service.get_chart_data("ADJ", TimeRange.ONE_YEAR)
+        opens, highs, lows = self.market_data_service.get_chart_ohlcv("ADJ", TimeRange.ONE_YEAR)
+
+        self.assertEqual(prices, [50.0, 50.5, 51.0])
+        self.assertAlmostEqual(opens[0], 50.0)
+        self.assertAlmostEqual(highs[0], 52.5)
+        self.assertAlmostEqual(lows[0], 47.5)
 
 
 if __name__ == "__main__":

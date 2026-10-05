@@ -7,6 +7,12 @@ from app.models.price_data import PricePoint
 from app.models.ticker import TickerConfig, TickerSummary
 from app.models.time_range import TimeRange
 from app.models.trend import TrendBucket
+from app.services.swing_detection import (
+    SwingAlgorithm,
+    detect_swings,
+    has_significant_swing,
+    restrict_swing_pivots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +33,15 @@ def classify_price_series(prices: List[float]) -> TrendBucket:
     return TrendBucket.LATERAL
 
 
-def is_swing_series(prices: List[float]) -> bool:
-    valid = [p for p in prices if p and p > 0]
-    if len(valid) < 2:
-        return False
-
-    low = min(valid)
-    return (max(valid) - low) / low >= SWING_RANGE_THRESHOLD
+def is_swing_series(
+    prices: List[float],
+    algorithm: SwingAlgorithm = SwingAlgorithm.RANGE,
+    ohlc: Optional[Tuple[List[float], List[float], List[float]]] = None,
+    params: Optional[Dict[str, Any]] = None,
+) -> bool:
+    return has_significant_swing(
+        algorithm, prices, ohlc, threshold_pct=SWING_RANGE_THRESHOLD * 100.0, params=params
+    )
 
 
 def count_trend_buckets(trends: Dict[str, TrendBucket]) -> Dict[TrendBucket, int]:
@@ -113,13 +121,86 @@ class MarketDataService:
     def get_trend_buckets(self, configs: List[TickerConfig], time_range: TimeRange) -> Dict[str, TrendBucket]:
         return {cfg.symbol: self.get_trend_bucket(cfg.symbol, time_range) for cfg in configs}
 
-    def get_swing_symbols(self, configs: List[TickerConfig], time_range: TimeRange) -> Set[str]:
+    def get_swing_symbols(
+        self,
+        configs: List[TickerConfig],
+        time_range: TimeRange,
+        algorithm: SwingAlgorithm = SwingAlgorithm.RANGE,
+        params: Optional[Dict[str, Any]] = None,
+        range_settings: Optional[Dict[str, Any]] = None,
+    ) -> Set[str]:
         symbols: Set[str] = set()
         for cfg in configs:
-            _, prices, _ = self.get_chart_data(cfg.symbol, time_range)
-            if is_swing_series(prices):
+            timestamps, prices, _ = self.get_chart_data(cfg.symbol, time_range)
+            if not prices:
+                continue
+            ohlc = None
+            if algorithm != SwingAlgorithm.RANGE:
+                ohlc = self.get_chart_ohlcv(cfg.symbol, time_range)
+            if not is_swing_series(prices, algorithm, ohlc, params=params):
+                continue
+            _, legs = self.detect_swing_overlay(
+                cfg.symbol, time_range, prices, timestamps, algorithm, params, range_settings
+            )
+            if legs:
                 symbols.add(cfg.symbol)
         return symbols
+
+    def detect_swing_pivots(
+        self,
+        symbol: str,
+        time_range: TimeRange,
+        prices: List[float],
+        algorithm: SwingAlgorithm = SwingAlgorithm.RANGE,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[int]:
+        """Returns pivot indices of the swing overlay for the given prices.
+
+        For the RANGE algorithm the global low and high of the series are
+        included so the min-max range can be visualized as well.
+        """
+        if not prices:
+            return []
+        ohlc = None
+        if algorithm != SwingAlgorithm.RANGE:
+            ohlc = self.get_chart_ohlcv(symbol, time_range)
+        pivots = detect_swings(algorithm, prices, ohlc, params=params)
+        if algorithm == SwingAlgorithm.RANGE and len(prices) >= 2:
+            low_index = min(range(len(prices)), key=prices.__getitem__)
+            high_index = max(range(len(prices)), key=prices.__getitem__)
+            pivots = sorted(set(pivots) | {low_index, high_index})
+        return pivots
+
+    def detect_swing_overlay(
+        self,
+        symbol: str,
+        time_range: TimeRange,
+        prices: List[float],
+        timestamps: List[float],
+        algorithm: SwingAlgorithm = SwingAlgorithm.RANGE,
+        params: Optional[Dict[str, Any]] = None,
+        range_settings: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[int], List[Tuple[int, int]]]:
+        """Returns ``(pivots, legs)`` for the chart overlay after applying the swing range filter."""
+        pivots = self.detect_swing_pivots(symbol, time_range, prices, algorithm, params)
+        return restrict_swing_pivots(pivots, timestamps, range_settings)
+
+    def _load_price_points(self, symbol: str, time_range: TimeRange) -> List[PricePoint]:
+        start_str = time_range.get_start_date().strftime("%Y-%m-%d 00:00:00")
+        return self.repo.get_prices(symbol, start_date=start_str)
+
+    def _iter_priced_points(self, points: List[PricePoint]):
+        for p in points:
+            try:
+                if " " in p.timestamp:
+                    dt = datetime.strptime(p.timestamp, "%Y-%m-%d %H:%M:%S")
+                else:
+                    dt = datetime.strptime(p.timestamp[:10], "%Y-%m-%d")
+            except Exception as e:
+                logger.warning(f"Could not parse timestamp '{p.timestamp}': {e}")
+                continue
+            val = p.adj_close if p.adj_close is not None and p.adj_close > 0 else p.close
+            yield p, dt, val
 
     def get_chart_data(self, symbol: str, time_range: TimeRange) -> Tuple[List[float], List[float], List[str]]:
         """
@@ -129,31 +210,34 @@ class MarketDataService:
             - prices: List of float values (Adjusted Close or Close) for PyQtGraph y-axis.
             - date_labels: List of human-readable ISO date strings for mouse tooltips.
         """
-        start_dt = time_range.get_start_date()
-        start_str = start_dt.strftime("%Y-%m-%d 00:00:00")
-
-        points = self.repo.get_prices(symbol, start_date=start_str)
+        points = self._load_price_points(symbol, time_range)
 
         timestamps: List[float] = []
         prices: List[float] = []
         date_labels: List[str] = []
 
-        for p in points:
-            try:
-                # Handle ISO format parsing
-                if " " in p.timestamp:
-                    dt = datetime.strptime(p.timestamp, "%Y-%m-%d %H:%M:%S")
-                else:
-                    dt = datetime.strptime(p.timestamp[:10], "%Y-%m-%d")
-
-                epoch = dt.timestamp()
-                val = p.adj_close if p.adj_close is not None and p.adj_close > 0 else p.close
-
-                timestamps.append(epoch)
-                prices.append(val)
-                date_labels.append(p.timestamp)
-            except Exception as e:
-                logger.warning(f"Could not parse timestamp '{p.timestamp}': {e}")
-                continue
+        for p, dt, val in self._iter_priced_points(points):
+            timestamps.append(dt.timestamp())
+            prices.append(val)
+            date_labels.append(p.timestamp)
 
         return timestamps, prices, date_labels
+
+    def get_chart_ohlcv(self, symbol: str, time_range: TimeRange) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Fetches open/high/low arrays aligned bar-by-bar with get_chart_data for the same range.
+        OHLC values are scaled by the close/adjusted-close ratio so they match the chart price series.
+        """
+        points = self._load_price_points(symbol, time_range)
+
+        opens: List[float] = []
+        highs: List[float] = []
+        lows: List[float] = []
+
+        for p, _, _ in self._iter_priced_points(points):
+            ratio = (p.adj_close / p.close) if (p.adj_close and p.close and p.close > 0) else 1.0
+            opens.append((p.open or 0.0) * ratio)
+            highs.append((p.high or 0.0) * ratio)
+            lows.append((p.low or 0.0) * ratio)
+
+        return opens, highs, lows
