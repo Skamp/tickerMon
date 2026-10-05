@@ -91,6 +91,20 @@ QListWidget::item:selected {
     border: 1px solid #2962ff;
 }
 
+QTreeWidget {
+    background-color: #1a1c24;
+    border: 1px solid #282b36;
+    border-radius: 6px;
+    outline: none;
+    padding: 4px;
+}
+
+QTreeWidget::item {
+    background-color: transparent;
+    padding: 4px;
+    margin-bottom: 2px;
+}
+
 /* Labels */
 QLabel {
     color: #e1e3ea;

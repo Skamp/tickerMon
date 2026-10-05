@@ -1,7 +1,8 @@
 import logging
 from typing import List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QBrush, QColor, QCursor, QPainter, QPen
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -9,10 +10,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QListWidget,
-    QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QHeaderView,
     QMessageBox,
     QCheckBox,
+    QStyledItemDelegate,
+    QStyle,
+    QStyleOptionViewItem,
     QWidget,
 )
 
@@ -20,6 +25,38 @@ from app.services.ticker_service import TickerService
 from app.models.ticker import TickerConfig
 
 logger = logging.getLogger(__name__)
+
+ROW_PADDING = 2
+
+
+class TickerRowDelegate(QStyledItemDelegate):
+    """Paints one continuous selection/hover band spanning all three columns."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        view = option.widget
+        opt = QStyleOptionViewItem(option)
+        selected = bool(opt.state & QStyle.State_Selected)
+        hovered = False
+        if view is not None:
+            hover_index = view.indexAt(view.mapFromGlobal(QCursor.pos()))
+            hovered = hover_index.isValid() and hover_index.row() == index.row()
+        opt.state &= ~(QStyle.State_Selected | QStyle.State_MouseOver)
+
+        if view is not None and index.column() == 0 and (selected or hovered):
+            last_index = index.model().index(index.row(), index.model().columnCount() - 1)
+            row_rect = QRect(opt.rect)
+            row_rect.setRight(view.visualRect(last_index).right())
+            row_rect.adjust(ROW_PADDING, ROW_PADDING, -ROW_PADDING, -ROW_PADDING)
+            painter.save()
+            if selected:
+                painter.fillRect(row_rect, QColor("#2a3147"))
+                painter.setPen(QPen(QColor("#2962ff"), 1))
+                painter.drawRoundedRect(row_rect, 4, 4)
+            else:
+                painter.fillRect(row_rect, QColor("#252836"))
+            painter.restore()
+
+        super().paint(painter, opt, index)
 
 
 class TickerAdminDialog(QDialog):
@@ -53,7 +90,22 @@ class TickerAdminDialog(QDialog):
 
         # Middle section: Ticker List + Side Action Buttons
         mid_layout = QHBoxLayout()
-        self.list_widget = QListWidget(self)
+        self.list_widget = QTreeWidget(self)
+        self.list_widget.setColumnCount(3)
+        self.list_widget.setHeaderHidden(True)
+        self.list_widget.setRootIsDecorated(False)
+        self.list_widget.setUniformRowHeights(True)
+        self.list_widget.setAllColumnsShowFocus(True)
+        self.list_widget.setEditTriggers(QTreeWidget.NoEditTriggers)
+        self.list_widget.setSelectionMode(QTreeWidget.SingleSelection)
+        header = self.list_widget.header()
+        header.setSectionsClickable(False)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.list_widget.setItemDelegate(TickerRowDelegate(self.list_widget))
+        self.list_widget.entered.connect(lambda *_: self.list_widget.viewport().update())
+        self.list_widget.viewportEntered.connect(lambda: self.list_widget.viewport().update())
         self.list_widget.currentItemChanged.connect(self._on_item_selected)
         mid_layout.addWidget(self.list_widget)
 
@@ -95,14 +147,39 @@ class TickerAdminDialog(QDialog):
 
     def refresh_list(self) -> None:
         self.list_widget.clear()
-        for t in self.ticker_service.get_all_tickers():
-            status_str = "[Enabled]" if t.enabled else "[Disabled]"
-            label = f"{t.symbol:<10} {status_str:<12} {t.name}"
-            item = QListWidgetItem(label)
-            item.setData(Qt.UserRole, t.symbol)
+        tickers = self.ticker_service.get_all_tickers()
+        for t in tickers:
+            item = QTreeWidgetItem()
+            item.setText(0, t.symbol)
+            item.setText(1, "[Enabled]" if t.enabled else "[Disabled]")
+            item.setText(2, t.name)
+            item.setData(0, Qt.UserRole, t.symbol)
             if not t.enabled:
-                item.setForeground(Qt.darkGray)
-            self.list_widget.addItem(item)
+                for col in range(3):
+                    item.setForeground(col, QBrush(Qt.darkGray))
+            self.list_widget.addTopLevelItem(item)
+        self._update_column_widths(tickers)
+
+    def _update_column_widths(self, tickers: List[TickerConfig]) -> None:
+        fm = self.list_widget.fontMetrics()
+        symbol_width = max([fm.horizontalAdvance(t.symbol) for t in tickers] or [0])
+        status_width = max(
+            fm.horizontalAdvance("[Enabled]"),
+            fm.horizontalAdvance("[Disabled]"),
+        )
+        self.list_widget.setColumnWidth(0, max(symbol_width + 24, 90))
+        self.list_widget.setColumnWidth(1, max(status_width + 24, 96))
+
+    def _current_row(self) -> int:
+        item = self.list_widget.currentItem()
+        if item is None:
+            return -1
+        return self.list_widget.indexOfTopLevelItem(item)
+
+    def _set_current_row(self, row: int) -> None:
+        item = self.list_widget.topLevelItem(row)
+        if item is not None:
+            self.list_widget.setCurrentItem(item)
 
     def _on_add_ticker(self) -> None:
         sym = self.sym_input.text().strip()
@@ -117,7 +194,7 @@ class TickerAdminDialog(QDialog):
         self.name_input.clear()
         self.refresh_list()
 
-    def _on_item_selected(self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]) -> None:
+    def _on_item_selected(self, current: Optional[QTreeWidgetItem], previous: Optional[QTreeWidgetItem]) -> None:
         has_sel = current is not None
         self.up_btn.setEnabled(has_sel)
         self.down_btn.setEnabled(has_sel)
@@ -125,20 +202,20 @@ class TickerAdminDialog(QDialog):
         self.delete_btn.setEnabled(has_sel)
 
     def _on_toggle_enable(self) -> None:
-        row = self.list_widget.currentRow()
+        row = self._current_row()
         if row < 0:
             return
-        item = self.list_widget.item(row)
-        sym = item.data(Qt.UserRole)
+        item = self.list_widget.topLevelItem(row)
+        sym = item.data(0, Qt.UserRole)
         for t in self.ticker_service.get_all_tickers():
             if t.symbol == sym:
                 self.ticker_service.update_ticker(sym, t.name, not t.enabled)
                 break
         self.refresh_list()
-        self.list_widget.setCurrentRow(row)
+        self._set_current_row(row)
 
     def _on_move_up(self) -> None:
-        row = self.list_widget.currentRow()
+        row = self._current_row()
         if row <= 0:
             return
         tickers = self.ticker_service.get_all_tickers()
@@ -146,10 +223,10 @@ class TickerAdminDialog(QDialog):
         symbols[row - 1], symbols[row] = symbols[row], symbols[row - 1]
         self.ticker_service.reorder_tickers(symbols)
         self.refresh_list()
-        self.list_widget.setCurrentRow(row - 1)
+        self._set_current_row(row - 1)
 
     def _on_move_down(self) -> None:
-        row = self.list_widget.currentRow()
+        row = self._current_row()
         tickers = self.ticker_service.get_all_tickers()
         if row < 0 or row >= len(tickers) - 1:
             return
@@ -157,14 +234,14 @@ class TickerAdminDialog(QDialog):
         symbols[row + 1], symbols[row] = symbols[row], symbols[row + 1]
         self.ticker_service.reorder_tickers(symbols)
         self.refresh_list()
-        self.list_widget.setCurrentRow(row + 1)
+        self._set_current_row(row + 1)
 
     def _on_delete(self) -> None:
-        row = self.list_widget.currentRow()
+        row = self._current_row()
         if row < 0:
             return
-        item = self.list_widget.item(row)
-        sym = item.data(Qt.UserRole)
+        item = self.list_widget.topLevelItem(row)
+        sym = item.data(0, Qt.UserRole)
 
         reply = QMessageBox.question(
             self,
