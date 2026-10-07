@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple, Dict, Any, Set
 
 from app.database.repositories import MarketDataRepository
@@ -18,6 +19,20 @@ logger = logging.getLogger(__name__)
 
 TREND_CHANGE_THRESHOLD_PCT = 2.0
 SWING_RANGE_THRESHOLD = 0.10
+
+# Fixed lookback windows (label, days) used by the performance strip above the chart.
+PERFORMANCE_RANGES: Tuple[Tuple[str, int], ...] = (
+    ("1D", 1),
+    ("1W", 7),
+    ("1M", 30),
+    ("3M", 90),
+    ("6M", 180),
+    ("1Y", 365),
+    ("5Y", 1825),
+)
+# Tolerance used when local history starts just inside a lookback window.
+PERFORMANCE_BASE_SLACK_RATIO = 0.05
+PERFORMANCE_BASE_MIN_SLACK_DAYS = 2.0
 
 
 def classify_price_series(prices: List[float]) -> TrendBucket:
@@ -113,6 +128,49 @@ class MarketDataService:
 
     def get_all_summaries(self, configs: List[TickerConfig]) -> List[TickerSummary]:
         return [self.get_ticker_summary(cfg) for cfg in configs]
+
+    def get_performance(self, symbol: str) -> Dict[str, Optional[float]]:
+        """
+        Computes the percentage gain/loss for each entry in PERFORMANCE_RANGES
+        using local SQLite prices only (no network requests).
+
+        Returns a mapping of range label -> percent change, where a range that
+        cannot be computed (missing or too-short local history) maps to None.
+        """
+        result: Dict[str, Optional[float]] = {key: None for key, _ in PERFORMANCE_RANGES}
+
+        series: List[Tuple[datetime, float]] = []
+        for p, dt, val in self._iter_priced_points(self.repo.get_prices(symbol)):
+            if val and val > 0:
+                series.append((dt, val))
+        if len(series) < 2:
+            return result
+
+        latest_dt, latest_val = series[-1]
+        for key, days in PERFORMANCE_RANGES:
+            cutoff = latest_dt - timedelta(days=days)
+            base_val: Optional[float] = None
+            for dt, val in series:
+                if dt <= cutoff:
+                    base_val = val
+                else:
+                    break
+
+            if base_val is None:
+                # Local history may start marginally inside the window (e.g. a
+                # fresh 5Y download or slightly stale data). Fall back to the
+                # oldest point only when the gap is small relative to the window.
+                oldest_dt, oldest_val = series[0]
+                slack_days = max(
+                    PERFORMANCE_BASE_MIN_SLACK_DAYS,
+                    days * PERFORMANCE_BASE_SLACK_RATIO,
+                )
+                if oldest_dt - cutoff <= timedelta(days=slack_days):
+                    base_val = oldest_val
+
+            if base_val and base_val > 0:
+                result[key] = (latest_val - base_val) / base_val * 100.0
+        return result
 
     def get_trend_bucket(self, symbol: str, time_range: TimeRange) -> TrendBucket:
         _, prices, _ = self.get_chart_data(symbol, time_range)
@@ -241,3 +299,57 @@ class MarketDataService:
             lows.append((p.low or 0.0) * ratio)
 
         return opens, highs, lows
+
+    def get_chart_volume(
+        self, symbol: str, time_range: TimeRange
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Fetches volume plus open/close arrays aligned bar-by-bar with get_chart_data.
+
+        Yahoo Finance's Volume field is the *total* traded volume for the period;
+        it does not provide a true buy-volume vs sell-volume breakdown. The
+        buying/selling classification derived from these open/close values is
+        only an approximation of pressure based on candle direction.
+        Open values are scaled by the close/adjusted-close ratio so they match
+        the chart price series; scaling by a positive factor keeps the candle
+        direction (Close vs Open) unchanged.
+
+        Returns:
+            - volumes: traded volume per bar (0.0 when missing/invalid).
+            - opens: open price per bar (0.0 when missing).
+            - closes: close price per bar, identical to get_chart_data prices.
+        """
+        points = self._load_price_points(symbol, time_range)
+
+        volumes: List[float] = []
+        opens: List[float] = []
+        closes: List[float] = []
+
+        for p, _, val in self._iter_priced_points(points):
+            ratio = (p.adj_close / p.close) if (p.adj_close and p.close and p.close > 0) else 1.0
+
+            try:
+                volume = float(p.volume)
+            except (TypeError, ValueError):
+                volume = 0.0
+            if not math.isfinite(volume) or volume < 0:
+                volume = 0.0
+            volumes.append(volume)
+
+            try:
+                open_value = float(p.open)
+            except (TypeError, ValueError):
+                open_value = 0.0
+            if not math.isfinite(open_value) or open_value <= 0:
+                open_value = 0.0
+            opens.append(open_value * ratio)
+
+            try:
+                close_value = float(val)
+            except (TypeError, ValueError):
+                close_value = 0.0
+            if not math.isfinite(close_value) or close_value <= 0:
+                close_value = 0.0
+            closes.append(close_value)
+
+        return volumes, opens, closes

@@ -175,6 +175,21 @@ class MarketDataRepository:
         point = self.get_latest_price_point(symbol)
         return point.timestamp if point else None
 
+    def get_first_timestamp(self, symbol: str) -> Optional[str]:
+        """Returns the earliest stored timestamp for a ticker symbol, if any."""
+        clean_symbol = symbol.upper().strip()
+        sql = "SELECT timestamp FROM prices WHERE symbol = ? ORDER BY timestamp ASC LIMIT 1;"
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, [clean_symbol])
+                row = cursor.fetchone()
+                if row:
+                    return row["timestamp"]
+        except Exception as e:
+            logger.error(f"Error getting first timestamp for {clean_symbol}: {e}")
+        return None
+
     def update_ticker_metadata(
         self,
         symbol: str,

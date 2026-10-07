@@ -9,11 +9,30 @@ from app.models.ticker import TickerConfig
 
 logger = logging.getLogger(__name__)
 
+# Full history window downloaded for new/backfilled tickers (supports the 5Y range).
+HISTORY_PERIOD = "5y"
+HISTORY_PERIOD_DAYS = 5 * 365 + 10
+
+
+def _parse_timestamp(ts: str) -> datetime:
+    if " " in ts:
+        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+    return datetime.strptime(ts[:10], "%Y-%m-%d")
+
 
 class SyncService:
     def __init__(self, yahoo_service: YahooService, repo: MarketDataRepository):
         self.yahoo_service = yahoo_service
         self.repo = repo
+
+    def _history_is_complete(self, oldest_ts: str) -> bool:
+        """Returns True when local history already reaches back through the 5Y window."""
+        try:
+            oldest = _parse_timestamp(oldest_ts)
+        except Exception as e:
+            logger.warning(f"Error parsing oldest timestamp '{oldest_ts}': {e}")
+            return False
+        return oldest <= datetime.now() - timedelta(days=HISTORY_PERIOD_DAYS)
 
     def sync_ticker(self, symbol: str, force_full: bool = False) -> Tuple[bool, str, int]:
         """
@@ -22,21 +41,16 @@ class SyncService:
         """
         clean_symbol = symbol.upper().strip()
         last_ts = self.repo.get_last_timestamp(clean_symbol)
+        oldest_ts = self.repo.get_first_timestamp(clean_symbol)
 
-        period = "2y"
+        period = HISTORY_PERIOD
         start_date = None
 
-        if not force_full and last_ts:
+        if not force_full and last_ts and oldest_ts and self._history_is_complete(oldest_ts):
             try:
                 # If we have existing data, request data starting 5 days prior to last timestamp
                 # to catch any recent revisions or split adjustments safely.
-                if " " in last_ts:
-                    dt = datetime.strptime(last_ts, "%Y-%m-%d %H:%M:%S")
-                else:
-                    dt = datetime.strptime(last_ts[:10], "%Y-%m-%d")
-
-                fetch_start = dt - timedelta(days=5)
-                start_date = fetch_start.strftime("%Y-%m-%d")
+                start_date = (_parse_timestamp(last_ts) - timedelta(days=5)).strftime("%Y-%m-%d")
             except Exception as e:
                 logger.warning(f"Error parsing last timestamp '{last_ts}' for {clean_symbol}: {e}")
                 start_date = None

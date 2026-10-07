@@ -11,7 +11,8 @@ Built with **PySide6**, **PyQtGraph**, **yfinance**, **SQLite**, **pandas**, **n
 - **Offline-First / Zero Lag**: Switching between tickers and time ranges queries a local SQLite database cache without network delays or web calls.
 - **Asynchronous Sync**: Historical market data downloads execute on a non-blocking background `QThread` with live per-ticker progress reporting.
 - **Interactive Financial Charts**: Dark-themed PyQtGraph time-series chart with crosshair cursor, hover tooltips (Date & Price), auto-scaling, and zoom controls clamped to the fit-view bounds (reset returns to it).
-- **Flexible Time Ranges**: View price performance across **1D**, **1W**, **1M**, **6M**, and **1Y** intervals.
+- **Volume Panel**: A compact volume sub-chart sits below the price chart on the same shared time axis, with green/red/neutral bars approximating buying/selling pressure from candle direction.
+- **Flexible Time Ranges**: View price performance across **1W**, **2W**, **3W**, **1M**, **6M**, **1Y**, and **5Y** intervals.
 - **20 Noise-Reduction Filters**: Overlay the price curve with QuadTree, EMA / EMA 50 / EMA 200, DEMA, TEMA, HMA, Savitzky-Golay, RDP (default / loose / tight), Kalman, Ehlers pass-band, decycler & universal oscillators, Reflex, Trendflex, Fisher, and fast/slow price-deviation oscillators.
 - **Swing Detection Overlay**: 22 swing algorithms drawn as a violet zigzag with pivot markers, translucent yellow leg bands, and a boxed readout of the active algorithm, its parameters, and the current range filter.
 - **Trend & Swing Sidebar Filtering**: Every ticker is bucketed as **Rise / Down / Lateral / Unsure** (±2% over the active range) or flagged as a **Swing**, with live counts and multi-select toggles above `MARKET WATCH`.
@@ -235,6 +236,17 @@ Changing the swing algorithm, its parameters, or the duration filter re-buckets 
 
 ---
 
+## 📊 Volume Panel
+
+Below the price chart a compact `VolumeChartWidget` renders one bar per price period, built from the same local OHLCV rows (Date, Open, Close, Volume — no additional API request):
+
+- Bar **height** is the real traded volume; the right-hand Y-axis abbreviates values (`1.2K`, `3.5M`, `2.1B`).
+- Bar **color** approximates pressure from candle direction — `Close > Open` green (Buying), `Close < Open` red (Selling), `Close == Open` dimmed (Neutral). Yahoo Finance reports only total traded volume, so this is an estimate, not actual buy/sell order flow.
+- Hovering a bar shows date, volume, open, close, change %, and the estimated pressure; a legend sits next to the `VOLUME` title.
+- The panel's time axis is X-linked to the price chart, so ticker, range, zoom, pan and duration changes keep both charts on the same time scale; its own bottom axis is hidden to avoid duplicated date labels. The panel gets ~25% of the chart area (price ~75%).
+
+---
+
 ## 🧭 Trend & Swing Sidebar Filtering
 
 `TrendFilterBar` sits above `MARKET WATCH` and shows live counts per bucket:
@@ -286,6 +298,7 @@ Test modules:
 | `tests/test_noise_reduction.py` | Every noise-reduction algorithm |
 | `tests/test_swing_detection.py` | All 22 swing detectors, parameter specs, duration range filtering |
 | `tests/test_time_ranges.py` | Time range boundaries |
+| `tests/test_volume_chart.py` | Volume formatting, pressure classification & bar width |
 
 ---
 

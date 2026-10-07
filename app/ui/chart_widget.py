@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGraphicsRectItem
 
 import pyqtgraph as pg
 
+from app.ui.volume_chart_widget import VolumeChartWidget
+
 logger = logging.getLogger(__name__)
 
 # Configure PyQtGraph global options for ultra-clean dark financial terminal
@@ -64,13 +66,20 @@ class StockChartWidget(QWidget):
         self.y_axis = PriceAxisItem(orientation="right")
 
         self.plot_widget = pg.PlotWidget(axisItems={"bottom": self.x_axis, "right": self.y_axis})
-        self.layout.addWidget(self.plot_widget)
+        self.layout.addWidget(self.plot_widget, 3)
 
         self.plot_item = self.plot_widget.getPlotItem()
         self.plot_item.showAxis("right", True)
         self.plot_item.hideAxis("left")
         self.plot_item.showGrid(x=True, y=True, alpha=0.10)
         self.plot_item.setMenuEnabled(True)
+
+        # Compact volume panel below the price chart; its time axis is X-linked
+        # to the price ViewBox so zoom, pan, range and ticker changes always
+        # keep both charts on exactly the same time scale.
+        self.volume_chart = VolumeChartWidget(self)
+        self.volume_chart.plot_item.vb.setXLink(self.plot_item.vb)
+        self.layout.addWidget(self.volume_chart, 1)
 
         # Raw Price Plot Curve Pen (1.2px width)
         self.pen = QPen(QColor("#00e676"))
@@ -188,6 +197,24 @@ class StockChartWidget(QWidget):
         self.curve.setData(self._x_data, self._y_data)
 
         self._fit_view_to_data()
+
+    def set_volume_data(
+        self,
+        timestamps: List[float],
+        volumes: List[float],
+        opens: List[float],
+        closes: List[float],
+        date_labels: List[str],
+    ) -> None:
+        """Renders the volume sub-chart aligned with the price chart time axis."""
+        if self._x_data and len(timestamps) != len(self._x_data):
+            logger.warning(
+                "Volume timestamps (%d) do not match price series length (%d)",
+                len(timestamps),
+                len(self._x_data),
+            )
+        x_data = self._x_data if self._x_data else timestamps
+        self.volume_chart.set_data(x_data, volumes, opens, closes, date_labels)
 
     def _fit_view_to_data(self) -> None:
         """Auto-fits the view to data bounds and locks zoom/pan limits to that fit view."""
@@ -368,18 +395,22 @@ class StockChartWidget(QWidget):
         self.swing_text.setPos(x_lo + (x_hi - x_lo) * 0.02, y_hi - (y_hi - y_lo) * 0.05)
 
     def show_empty_state(self, visible: bool, message: Optional[str] = None) -> None:
-        """Toggles display between plot widget and empty state message."""
+        """Toggles display between plot widgets and empty state message."""
         if visible:
             if message:
                 self.empty_label.setText(message)
+            self.volume_chart.clear()
             self.plot_widget.hide()
+            self.volume_chart.hide()
             self.empty_label.show()
         else:
             self.empty_label.hide()
             self.plot_widget.show()
+            self.volume_chart.show()
 
     def reset_view(self) -> None:
         """Resets zoom and pan to the captured fit view for the current range."""
+        self.volume_chart.reset_view()
         if self._view_bounds is None:
             self._fit_view_to_data()
             return

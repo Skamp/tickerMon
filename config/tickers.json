@@ -1,6 +1,6 @@
 {
-    "selected_ticker": "TSLA",
-    "selected_range": "1Y",
+    "selected_ticker": "MSFT",
+    "selected_range": "3W",
     "tickers": [
         {
             "symbol": "AAPL",
@@ -45,6 +45,121 @@
         {
             "symbol": "ACN",
             "name": "Accenture",
+            "enabled": true
+        },
+        {
+            "symbol": "CRWD",
+            "name": "CrowdStrike Holdings, Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "ARM",
+            "name": "Arm Holdings plc",
+            "enabled": true
+        },
+        {
+            "symbol": "AVGO",
+            "name": "Broadcom Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "TSM",
+            "name": "Taiwan Semiconductor Manufacturing Company Limited",
+            "enabled": true
+        },
+        {
+            "symbol": "LRCX",
+            "name": "Lam Research Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "PANW",
+            "name": "Palo Alto Networks, Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "VRT",
+            "name": "Vertiv Holdings Co",
+            "enabled": true
+        },
+        {
+            "symbol": "LLY",
+            "name": "Eli Lilly and Company",
+            "enabled": true
+        },
+        {
+            "symbol": "COST",
+            "name": "Costco Wholesale Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "PEP",
+            "name": "PepsiCo, Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "DAL",
+            "name": "Delta Air Lines, Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "STZ",
+            "name": "Constellation Brands, Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "LEVI",
+            "name": "Levi Strauss & Co.",
+            "enabled": true
+        },
+        {
+            "symbol": "APLD",
+            "name": "Applied Digital Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "RKLB",
+            "name": "Rocket Lab Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "ALAB",
+            "name": "Astera Labs, Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "DECK",
+            "name": "Deckers Outdoor Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "GOOG",
+            "name": "Alphabet Inc.",
+            "enabled": true
+        },
+        {
+            "symbol": "STX",
+            "name": "Seagate Technology Holdings plc",
+            "enabled": true
+        },
+        {
+            "symbol": "WDC",
+            "name": "Western Digital Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "ORCL",
+            "name": "Oracle Corporation",
+            "enabled": true
+        },
+        {
+            "symbol": "CAT",
+            "name": "Caterpillar",
+            "enabled": true
+        },
+        {
+            "symbol": "ADBE",
+            "name": "Adobe Inc.",
             "enabled": true
         }
     ],
@@ -182,8 +297,8 @@
     },
     "swing_range_settings": {
         "mode": "Duration window (both bounds)",
-        "value": 2,
-        "value_max": 4,
+        "value": 0,
+        "value_max": 1,
         "unit": "weeks"
     }
 }

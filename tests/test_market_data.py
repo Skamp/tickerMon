@@ -13,6 +13,7 @@ from app.services.market_data_service import (
     classify_price_series,
     count_trend_buckets,
     is_swing_series,
+    PERFORMANCE_RANGES,
 )
 from app.services.swing_detection import SwingAlgorithm
 from app.services.sync_service import SyncService
@@ -86,6 +87,76 @@ class TestMarketData(unittest.TestCase):
 
         points = self.repo.get_prices("GOOGL")
         self.assertEqual(len(points), 3)
+
+    def test_get_performance_ranges(self):
+        n_days = 400
+        closes = [100.0 + 0.1 * i for i in range(n_days)]
+        self._seed_closes("PERF", closes)
+
+        perf = self.market_data_service.get_performance("PERF")
+        self.assertEqual(set(perf), {key for key, _ in PERFORMANCE_RANGES})
+
+        latest = closes[-1]
+        for key, days in PERFORMANCE_RANGES:
+            if days < n_days:
+                base = closes[-1 - days]
+                self.assertAlmostEqual(
+                    perf[key], (latest - base) / base * 100.0, places=6, msg=key
+                )
+            else:
+                self.assertIsNone(perf[key], f"{key} needs more history")
+
+    def test_get_performance_requires_history(self):
+        perf_missing = self.market_data_service.get_performance("NO_SUCH_TICKER")
+        self.assertTrue(all(v is None for v in perf_missing.values()))
+
+        self._seed_closes("SHORT", [100.0 + i for i in range(10)])
+        perf_short = self.market_data_service.get_performance("SHORT")
+        self.assertIsNotNone(perf_short["1D"])
+        self.assertIsNotNone(perf_short["1W"])
+        self.assertIsNone(perf_short["1M"])
+        self.assertIsNone(perf_short["1Y"])
+        self.assertIsNone(perf_short["5Y"])
+
+    def test_get_performance_sign(self):
+        self._seed_closes("UP", [100.0, 105.0, 110.0])
+        self._seed_closes("DOWN", [110.0, 105.0, 100.0])
+
+        self.assertGreater(self.market_data_service.get_performance("UP")["1D"], 0.0)
+        self.assertLess(self.market_data_service.get_performance("DOWN")["1D"], 0.0)
+
+    def test_sync_backfills_short_history(self):
+        mock_yahoo = MagicMock(spec=YahooService)
+        mock_yahoo.fetch_ticker_data.return_value = (pd.DataFrame(), {"company_name": "New"})
+
+        sync = SyncService(mock_yahoo, self.repo)
+        self._seed_series("NEWCO", 100.0, 110.0, periods=50)
+        sync.sync_ticker("NEWCO")
+
+        kwargs = mock_yahoo.fetch_ticker_data.call_args.kwargs
+        self.assertEqual(kwargs.get("period"), "5y")
+        self.assertIsNone(kwargs.get("start_date"))
+
+    def test_sync_incremental_when_history_complete(self):
+        mock_yahoo = MagicMock(spec=YahooService)
+        mock_yahoo.fetch_ticker_data.return_value = (pd.DataFrame(), {"company_name": "Old"})
+
+        dates = pd.date_range(end=pd.Timestamp.now().normalize(), periods=1900, freq="D")
+        df = pd.DataFrame({
+            "Open": [100.0] * len(dates),
+            "High": [100.0] * len(dates),
+            "Low": [100.0] * len(dates),
+            "Close": [100.0] * len(dates),
+            "Adj Close": [100.0] * len(dates),
+            "Volume": [1000] * len(dates),
+        }, index=dates)
+        self.repo.upsert_price_data("OLDCO", df)
+
+        sync = SyncService(mock_yahoo, self.repo)
+        sync.sync_ticker("OLDCO")
+
+        kwargs = mock_yahoo.fetch_ticker_data.call_args.kwargs
+        self.assertIsNotNone(kwargs.get("start_date"))
 
     def test_classify_price_series(self):
         self.assertEqual(classify_price_series([]), TrendBucket.UNSURE)
@@ -372,6 +443,52 @@ class TestMarketData(unittest.TestCase):
         self.assertAlmostEqual(opens[0], 50.0)
         self.assertAlmostEqual(highs[0], 52.5)
         self.assertAlmostEqual(lows[0], 47.5)
+
+    def test_chart_volume_alignment(self):
+        self._seed_series("VOLA", 100.0, 140.0)
+
+        _, prices, _ = self.market_data_service.get_chart_data("VOLA", TimeRange.ONE_YEAR)
+        volumes, opens, closes = self.market_data_service.get_chart_volume(
+            "VOLA", TimeRange.ONE_YEAR
+        )
+
+        self.assertEqual(len(volumes), len(prices))
+        self.assertEqual(len(opens), len(prices))
+        self.assertEqual(len(closes), len(prices))
+        self.assertEqual(closes, prices)
+        for volume in volumes:
+            self.assertEqual(volume, 1000.0)
+
+    def test_chart_volume_scales_open_to_adjusted_close(self):
+        dates = pd.date_range(end=pd.Timestamp.now().normalize(), periods=3, freq="D")
+        df = pd.DataFrame({
+            "Open": [100.0, 101.0, 102.0],
+            "High": [105.0, 106.0, 107.0],
+            "Low": [95.0, 96.0, 97.0],
+            "Close": [100.0, 101.0, 102.0],
+            "Adj Close": [50.0, 50.5, 51.0],
+            "Volume": [1000, 2000, 3000],
+        }, index=dates)
+        self.repo.upsert_price_data("VADJ", df)
+
+        _, prices, _ = self.market_data_service.get_chart_data("VADJ", TimeRange.ONE_YEAR)
+        volumes, opens, closes = self.market_data_service.get_chart_volume(
+            "VADJ", TimeRange.ONE_YEAR
+        )
+
+        self.assertEqual(prices, [50.0, 50.5, 51.0])
+        self.assertEqual(closes, prices)
+        self.assertAlmostEqual(opens[0], 50.0)
+        self.assertAlmostEqual(opens[1], 50.5)
+        self.assertEqual(volumes, [1000.0, 2000.0, 3000.0])
+
+    def test_chart_volume_missing_symbol(self):
+        volumes, opens, closes = self.market_data_service.get_chart_volume(
+            "NOSUCH", TimeRange.ONE_YEAR
+        )
+        self.assertEqual(volumes, [])
+        self.assertEqual(opens, [])
+        self.assertEqual(closes, [])
 
 
 if __name__ == "__main__":

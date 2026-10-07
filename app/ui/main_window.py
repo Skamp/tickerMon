@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QShortcut, QKeySequence
@@ -23,7 +23,11 @@ from PySide6.QtWidgets import (
 from app.models.time_range import TimeRange
 from app.models.ticker import TickerConfig, TickerSummary
 from app.services.ticker_service import TickerService
-from app.services.market_data_service import MarketDataService, count_trend_buckets
+from app.services.market_data_service import (
+    MarketDataService,
+    count_trend_buckets,
+    PERFORMANCE_RANGES,
+)
 from app.services.sync_service import SyncService
 from app.services.noise_reduction import NoiseReductionAlgorithm, reduce_noise
 from app.services.swing_detection import (
@@ -58,8 +62,8 @@ class MainWindow(QMainWindow):
         self.sync_service = sync_service
 
         self.setWindowTitle("tickerMon - Stock Market Terminal")
-        self.resize(1340, 780)
-        self.setMinimumSize(1024, 600)
+        self.resize(1480, 780)
+        self.setMinimumSize(1240, 600)
 
         self._active_range = TimeRange.ONE_YEAR
         self._active_noise_algo = NoiseReductionAlgorithm.NONE
@@ -260,7 +264,15 @@ class MainWindow(QMainWindow):
         self.range_button_group = QButtonGroup(self)
         self.range_button_group.setExclusive(True)
 
-        for tr in [TimeRange.ONE_WEEK, TimeRange.ONE_MONTH, TimeRange.SIX_MONTHS, TimeRange.ONE_YEAR]:
+        for tr in [
+            TimeRange.ONE_WEEK,
+            TimeRange.TWO_WEEKS,
+            TimeRange.THREE_WEEKS,
+            TimeRange.ONE_MONTH,
+            TimeRange.SIX_MONTHS,
+            TimeRange.ONE_YEAR,
+            TimeRange.FIVE_YEARS,
+        ]:
             btn = QPushButton(tr.value, toolbar_frame)
             btn.setCheckable(True)
             btn.setProperty("time_range", tr)
@@ -364,6 +376,42 @@ class MainWindow(QMainWindow):
 
         right_layout.addLayout(self.header_card)
 
+        # Performance strip: win/loss % for fixed lookback ranges
+        perf_row = QHBoxLayout()
+        perf_row.setSpacing(4)
+
+        perf_title = QLabel("PERFORMANCE", right_panel)
+        perf_title.setStyleSheet(
+            "font-size: 11px; font-weight: bold; color: #8b90a0; letter-spacing: 1px;"
+        )
+        perf_title.setAlignment(Qt.AlignVCenter)
+        perf_row.addWidget(perf_title)
+        perf_row.setAlignment(perf_title, Qt.AlignVCenter)
+        perf_row.addSpacing(12)
+
+        self.lbl_performance: Dict[str, QLabel] = {}
+        for key, _ in PERFORMANCE_RANGES:
+            cell = QVBoxLayout()
+            cell.setSpacing(0)
+
+            range_label = QLabel(key, right_panel)
+            range_label.setAlignment(Qt.AlignCenter)
+            range_label.setStyleSheet("font-size: 10px; font-weight: bold; color: #8b90a0;")
+            range_label.setToolTip(f"Price change over the last {key} (local data)")
+
+            value_label = QLabel("--", right_panel)
+            value_label.setAlignment(Qt.AlignCenter)
+            value_label.setObjectName("changeNeutral")
+            value_label.setToolTip(f"Price change over the last {key} (local data)")
+
+            cell.addWidget(range_label)
+            cell.addWidget(value_label)
+            perf_row.addLayout(cell, 1)
+
+            self.lbl_performance[key] = value_label
+
+        right_layout.addLayout(perf_row)
+
         # Horizontal Divider Line
         line = QFrame(right_panel)
         line.setFrameShape(QFrame.HLine)
@@ -451,6 +499,7 @@ class MainWindow(QMainWindow):
         self.lbl_company.setText(summary.company_name)
 
         self._restore_summary_display()
+        self._update_performance_display()
 
         # Update PyQtGraph Chart (Offline SQLite Query)
         timestamps, prices, date_labels = self.market_data_service.get_chart_data(symbol, self._active_range)
@@ -493,6 +542,12 @@ class MainWindow(QMainWindow):
                 self.lbl_change.setStyle(self.lbl_change.style())
 
             self.chart_widget.set_data(timestamps, prices, date_labels, line_color=color)
+
+            # Volume bars from the same local OHLCV rows (no extra API call)
+            volumes, opens, closes = self.market_data_service.get_chart_volume(
+                symbol, self._active_range
+            )
+            self.chart_widget.set_volume_data(timestamps, volumes, opens, closes, date_labels)
 
             # Apply active noise reduction algorithm overlay
             self._apply_active_noise_reduction(timestamps, prices)
@@ -678,6 +733,34 @@ class MainWindow(QMainWindow):
 
         self.lbl_info_range.setText(f"Range: {self._active_range.display_name}")
         self.lbl_last_sync.setText(f"Last Sync: {summary.last_updated or 'Never'}")
+
+    def _update_performance_display(self) -> None:
+        """Refreshes the fixed-range win/loss percentages shown above the chart."""
+        symbol = self.ticker_list.get_selected_symbol()
+        performance = self.market_data_service.get_performance(symbol) if symbol else {}
+
+        for key, label in self.lbl_performance.items():
+            pct = performance.get(key)
+            if pct is None:
+                label.setText("--")
+                object_name = "changeNeutral"
+                tooltip = (
+                    f"Not enough local history for {key}. "
+                    "Press Update Data (Ctrl+U) to download more."
+                )
+            else:
+                label.setText(f"{pct:+.2f}%")
+                if pct > 0:
+                    object_name = "changePositive"
+                elif pct < 0:
+                    object_name = "changeNegative"
+                else:
+                    object_name = "changeNeutral"
+                tooltip = f"{key} price change based on local adjusted close data"
+
+            label.setObjectName(object_name)
+            label.setToolTip(tooltip)
+            label.setStyle(label.style())
 
     def _on_chart_hover_changed(self, dt_str: str, price: float) -> None:
         """Dynamically updates header card to display exact hovered date & price."""

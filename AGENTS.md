@@ -5,6 +5,7 @@ tickerMon is a PySide6 desktop application for monitoring stock tickers with loc
 Beyond raw price charts it provides:
 - **Noise-reduction overlays** (20 filters) selected from a toolbar combo, with visibility toggled through the `Filters…` dialog.
 - **Swing detection overlays** (22 algorithms) drawn on the chart as pivots + legs, configured through the `Swing…` dialog and a toolbar duration-range filter.
+- **Volume sub-chart** below the price chart (green/red/neutral bars approximating buying/selling pressure from candle direction) on a shared, X-linked time axis.
 - **Trend/swing sidebar filtering**: tickers are bucketed into `Rise/Down/Lateral/Unsure` (±2% over the active range) or flagged as swinging, with live counts above `MARKET WATCH`.
 
 ## Tech Stack (from requirements.txt)
@@ -20,7 +21,8 @@ Beyond raw price charts it provides:
 
 ## Key Modules
 - `app/ui/main_window.py` - Toolbar (Filter / Swing / Duration rows), sidebar wiring, overlay refresh.
-- `app/ui/chart_widget.py` - Price curve, filter overlay, swing overlay (zigzag, leg bands, annotation), fit-view zoom limits.
+- `app/ui/chart_widget.py` - Price curve, filter overlay, swing overlay (zigzag, leg bands, annotation), fit-view zoom limits, embedded volume panel.
+- `app/ui/volume_chart_widget.py` - `VolumeChartWidget` (volume bars, K/M/B axis, legend, tooltip), `format_volume()`, `classify_volume_pressure()`.
 - `app/ui/ticker_list.py` / `app/ui/trend_filter_bar.py` - Sidebar list with trend/swing filtering and selection preservation.
 - `app/ui/filter_settings_dialog.py` / `app/ui/swing_settings_dialog.py` - Visibility + parameter dialogs.
 - `app/services/noise_reduction.py` - `NoiseReductionAlgorithm` enum and the `reduce_noise()` dispatcher.
@@ -59,7 +61,7 @@ You can also run with unittest (as documented in README):
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Test modules: `test_config.py`, `test_database.py`, `test_market_data.py`, `test_noise_reduction.py`, `test_swing_detection.py`, `test_time_ranges.py`.
+Test modules: `test_config.py`, `test_database.py`, `test_market_data.py`, `test_noise_reduction.py`, `test_swing_detection.py`, `test_time_ranges.py`, `test_volume_chart.py`.
 
 ## Project Conventions
 - Follow PEP 8 style guidelines with 4-space indentation.
