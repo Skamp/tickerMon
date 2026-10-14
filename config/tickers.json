@@ -1,6 +1,6 @@
 {
-    "selected_ticker": "UI",
-    "selected_range": "3W",
+    "selected_ticker": "STX",
+    "selected_range": "6M",
     "tickers": [
         {
             "symbol": "AAPL",
@@ -241,6 +241,12 @@
             "name": "Ubiquiti Inc.",
             "enabled": true,
             "added_at": "2026-10-14 10:47:09"
+        },
+        {
+            "symbol": "285A.T",
+            "name": "Kioxia Holdings Corporation",
+            "enabled": true,
+            "added_at": "2026-10-14 14:29:09"
         }
     ],
     "enabled_filters": [
@@ -263,6 +269,11 @@
         "Pivot Window (find_peaks)",
         "Swing Index / ASI (Wilder)",
         "Parabolic SAR",
+        "Heikin-Ashi",
+        "RSI",
+        "Stochastic",
+        "MACD",
+        "CCI",
         "Keltner Channels"
     ],
     "swing_algorithm_params": {
@@ -324,7 +335,7 @@
             "lower": 20.0
         },
         "MACD": {
-            "min_swing_pct": 10.0,
+            "min_swing_pct": 20.0,
             "fast": 12.0,
             "slow": 26.0,
             "signal": 9.0
@@ -380,5 +391,6 @@
         "value": 0,
         "value_max": 1,
         "unit": "weeks"
-    }
+    },
+    "chart_type": "Baseline"
 }

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from app.models.ticker import TickerSummary
 from app.models.trend import TrendBucket
+from app.utils.currency import format_price
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class TickerItemDelegate(QStyledItemDelegate):
 
         # Price
         if summary.current_price is not None:
-            price_text = f"${summary.current_price:,.2f}"
+            price_text = format_price(summary.current_price, summary.currency)
             painter.drawText(
                 QRect(content_rect.right() - 110, content_rect.top(), 110, 20),
                 Qt.AlignRight | Qt.AlignVCenter,

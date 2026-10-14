@@ -5,6 +5,7 @@ from app.config.config_manager import ConfigManager
 from app.services.ticker_service import TickerService
 from app.services.noise_reduction import NoiseReductionAlgorithm
 from app.services.swing_detection import SwingAlgorithm, SwingRangeMode, default_swing_params
+from app.models.chart_type import ChartType
 from app.models.ticker import TickerConfig
 
 
@@ -282,6 +283,35 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(tickers)
         for ticker in tickers:
             self.assertIsNotNone(ticker.added_at)
+
+    def test_chart_type_defaults_to_line(self):
+        self.assertIsNone(self.config_manager.load_chart_type())
+
+        service = TickerService(self.config_manager)
+        self.assertEqual(service.get_chart_type(), ChartType.LINE)
+
+    def test_chart_type_roundtrip(self):
+        service = TickerService(self.config_manager)
+        self.assertTrue(service.set_chart_type(ChartType.CANDLE))
+
+        reloaded = TickerService(self.config_manager)
+        self.assertEqual(reloaded.get_chart_type(), ChartType.CANDLE)
+
+    def test_chart_type_survives_ticker_save(self):
+        service = TickerService(self.config_manager)
+        service.set_chart_type(ChartType.BASELINE)
+
+        ok, _ = service.add_ticker("IBM", "International Business Machines")
+        self.assertTrue(ok)
+
+        self.assertEqual(self.config_manager.load_chart_type(), ChartType.BASELINE.value)
+        reloaded = TickerService(self.config_manager)
+        self.assertEqual(reloaded.get_chart_type(), ChartType.BASELINE)
+
+    def test_chart_type_ignores_unknown_value(self):
+        self.config_manager.save_chart_type("Heikin-Ashi")
+        service = TickerService(self.config_manager)
+        self.assertEqual(service.get_chart_type(), ChartType.LINE)
 
 
 if __name__ == "__main__":

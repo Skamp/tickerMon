@@ -168,6 +168,33 @@ class ConfigManager:
             logger.error(f"Failed to save swing range settings: {e}")
             return False
 
+    def load_chart_type(self) -> Optional[str]:
+        """Returns the configured price chart type, or None when no setting exists yet."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("chart_type")
+        except Exception as e:
+            logger.error(f"Error reading chart type setting: {e}")
+            return None
+
+    def save_chart_type(self, chart_type: str) -> bool:
+        """Saves the selected price chart type (Line / Candle / Baseline)."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["chart_type"] = chart_type
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved chart type setting to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save chart type setting: {e}")
+            return False
+
     def _read_raw_config(self) -> Dict[str, Any]:
         if not self.config_path.exists():
             return {}

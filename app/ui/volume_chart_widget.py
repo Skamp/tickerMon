@@ -23,6 +23,8 @@ from PySide6.QtWidgets import QLabel, QWidget, QHBoxLayout, QVBoxLayout
 
 import pyqtgraph as pg
 
+from app.utils.currency import get_currency_symbol
+
 logger = logging.getLogger(__name__)
 
 BUY_COLOR = "#00e676"
@@ -195,8 +197,13 @@ class VolumeChartWidget(QWidget):
         self._opens: List[float] = []
         self._closes: List[float] = []
         self._date_labels: List[str] = []
+        self._currency_symbol = "$"
 
         self.plot_widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
+
+    def set_currency(self, currency_code: Optional[str]) -> None:
+        """Sets the currency symbol used by the Open/Close tooltip rows."""
+        self._currency_symbol = get_currency_symbol(currency_code)
 
     def set_data(
         self,
@@ -284,12 +291,13 @@ class VolumeChartWidget(QWidget):
         pressure = classify_volume_pressure(open_value, close_value)
 
         lines = [f"Date: {date_str}", f"Volume: {format_volume(volume)}"]
+        sym = self._currency_symbol
         if open_value > 0:
-            lines.append(f"Open: ${open_value:,.2f}")
+            lines.append(f"Open: {sym}{open_value:,.2f}")
         else:
             lines.append("Open: n/a")
         if close_value > 0:
-            lines.append(f"Close: ${close_value:,.2f}")
+            lines.append(f"Close: {sym}{close_value:,.2f}")
         else:
             lines.append("Close: n/a")
         if open_value > 0 and close_value > 0:

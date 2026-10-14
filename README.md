@@ -11,6 +11,7 @@ Built with **PySide6**, **PyQtGraph**, **yfinance**, **SQLite**, **pandas**, **n
 - **Offline-First / Zero Lag**: Switching between tickers and time ranges queries a local SQLite database cache without network delays or web calls.
 - **Asynchronous Sync**: Historical market data downloads execute on a non-blocking background `QThread` with live per-ticker progress reporting.
 - **Interactive Financial Charts**: Dark-themed PyQtGraph time-series chart with crosshair cursor, hover tooltips (Date & Price), auto-scaling, and zoom controls clamped to the fit-view bounds (reset returns to it).
+- **Three Chart Types**: Switch the price pane between **Line** (default), **Candle** (OHLC candlesticks), and **Baseline** (close relative to the first price of the range) from a compact toolbar dropdown.
 - **Volume Panel**: A compact volume sub-chart sits below the price chart on the same shared time axis, with green/red/neutral bars approximating buying/selling pressure from candle direction.
 - **Flexible Time Ranges**: View price performance across **1W**, **2W**, **3W**, **1M**, **6M**, **1Y**, and **5Y** intervals.
 - **20 Noise-Reduction Filters**: Overlay the price curve with QuadTree, EMA / EMA 50 / EMA 200, DEMA, TEMA, HMA, Savitzky-Golay, RDP (default / loose / tight), Kalman, Ehlers pass-band, decycler & universal oscillators, Reflex, Trendflex, Fisher, and fast/slow price-deviation oscillators.
@@ -237,6 +238,20 @@ Changing the swing algorithm, its parameters, or the duration filter re-buckets 
 
 ---
 
+## 📈 Chart Types
+
+A compact `Chart type:` dropdown stacked below the `Range:` buttons switches the price pane between three rendering modes; the selection is persisted in `config/tickers.json` and defaults to **Line**:
+
+| Mode | Rendering |
+| :--- | :--- |
+| **Line** | The original close-price line with its soft fill, overlays, and tooltips. |
+| **Candle** | Green/red/neutral OHLC candlesticks (body from Open to Close, wicks to High/Low) built from the same locally cached OHLC rows used for swing detection — no extra API request. Invalid or missing OHLC rows are skipped; when no valid candle exists the chart falls back to the line. The tooltip adds `O`/`H`/`L` values. |
+| **Baseline** | The close line relative to the first valid close of the selected range: a dashed horizontal reference line with green fill above it and red fill below it, including interpolated crossing points so fills meet the baseline exactly. The baseline is recomputed on ticker/range change, not on zoom/pan. The tooltip shows the baseline value. |
+
+All three modes keep the volume panel X-linked on the same time scale, and the filter and swing overlays continue to work unchanged. Changing the chart type redraws immediately from cached data.
+
+---
+
 ## 📊 Volume Panel
 
 Below the price chart a compact `VolumeChartWidget` renders one bar per price period, built from the same local OHLCV rows (Date, Open, Close, Volume — no additional API request):
@@ -295,6 +310,7 @@ Test modules:
 
 | Module | Coverage |
 | :--- | :--- |
+| `tests/test_chart_type.py` | Chart type enum, candle classification/geometry, baseline series splitting |
 | `tests/test_config.py` | Config persistence, filter/swing settings, params & range normalization |
 | `tests/test_database.py` | SQLite repository behaviour |
 | `tests/test_market_data.py` | Chart data, OHLCV alignment, trend bucketing, swing symbols & overlay |

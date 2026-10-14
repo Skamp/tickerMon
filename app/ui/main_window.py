@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.time_range import TimeRange
+from app.models.chart_type import ChartType
 from app.models.ticker import TickerConfig, TickerSummary
 from app.services.ticker_service import TickerService
 from app.services.market_data_service import (
@@ -37,6 +38,7 @@ from app.services.swing_detection import (
     describe_swing_range,
     format_swing_params,
 )
+from app.utils.currency import format_price
 from app.ui.ticker_list import (
     TickerListWidget,
     SORT_BY_TICKER,
@@ -76,6 +78,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1240, 600)
 
         self._active_range = TimeRange.ONE_YEAR
+        self._active_chart_type = ChartType.LINE
         self._active_noise_algo = NoiseReductionAlgorithm.NONE
         self._active_swing_algo = SwingAlgorithm.RANGE
         self._current_summary: Optional[TickerSummary] = None
@@ -277,10 +280,16 @@ class MainWindow(QMainWindow):
 
         toolbar_layout.addSpacing(15)
 
-        # Time Range Button Group
+        # Time Range Selector with the chart type selector stacked below it
+        range_stack = QVBoxLayout()
+        range_stack.setSpacing(4)
+
+        range_row = QHBoxLayout()
+        range_row.setSpacing(12)
+
         range_label = QLabel("Range:", toolbar_frame)
         range_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
-        toolbar_layout.addWidget(range_label)
+        range_row.addWidget(range_label)
 
         self.range_button_group = QButtonGroup(self)
         self.range_button_group.setExclusive(True)
@@ -301,7 +310,56 @@ class MainWindow(QMainWindow):
                 btn.setChecked(True)
             btn.clicked.connect(self._on_range_changed)
             self.range_button_group.addButton(btn)
-            toolbar_layout.addWidget(btn)
+            range_row.addWidget(btn)
+
+        range_stack.addLayout(range_row)
+
+        chart_row = QHBoxLayout()
+        chart_row.setSpacing(8)
+
+        # Price Chart Type Selector (Line / Candle / Baseline)
+        chart_label = QLabel("Chart type:", toolbar_frame)
+        chart_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+
+        chart_row.addWidget(chart_label)
+
+        self.combo_chart_type = QComboBox(toolbar_frame)
+        self.combo_chart_type.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.combo_chart_type.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        for chart_type in ChartType:
+            self.combo_chart_type.addItem(chart_type.value, userData=chart_type)
+        self.combo_chart_type.setStyleSheet("""
+            QComboBox {
+                background-color: #252836;
+                color: #e1e3ea;
+                border: 1px solid #323647;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-weight: 600;
+                min-width: 84px;
+            }
+            QComboBox:hover {
+                border-color: #454b61;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1c24;
+                color: #e1e3ea;
+                selection-background-color: #2962ff;
+            }
+        """)
+        self.combo_chart_type.setToolTip(
+            "Price chart rendering style.\n"
+            "Line: close price line (default).\n"
+            "Candle: OHLC candlesticks.\n"
+            "Baseline: close relative to the first price in the range."
+        )
+        self.combo_chart_type.currentIndexChanged.connect(self._on_chart_type_changed)
+        chart_row.addWidget(self.combo_chart_type)
+        chart_row.addStretch()
+
+        range_stack.addLayout(chart_row)
+
+        toolbar_layout.addLayout(range_stack)
 
         toolbar_layout.addStretch()
 
@@ -521,6 +579,13 @@ class MainWindow(QMainWindow):
                 btn.setChecked(True)
                 break
 
+        self._active_chart_type = self.ticker_service.get_chart_type()
+        chart_index = self.combo_chart_type.findData(self._active_chart_type)
+        if chart_index >= 0:
+            self.combo_chart_type.blockSignals(True)
+            self.combo_chart_type.setCurrentIndex(chart_index)
+            self.combo_chart_type.blockSignals(False)
+
         self._refresh_ticker_list(select_symbol=target_ticker)
 
     def _refresh_ticker_list(self, select_symbol: Optional[str] = None) -> None:
@@ -567,6 +632,7 @@ class MainWindow(QMainWindow):
 
         summary = self.market_data_service.get_ticker_summary(config)
         self._current_summary = summary
+        self.chart_widget.set_currency(summary.currency)
         self.lbl_symbol.setText(summary.symbol)
         self.lbl_company.setText(summary.company_name)
 
@@ -591,7 +657,9 @@ class MainWindow(QMainWindow):
         else:
             self._period_start_price = prices[0]
             hi_val, lo_val = max(prices), min(prices)
-            self.lbl_high_low.setText(f"High: ${hi_val:,.2f} | Low: ${lo_val:,.2f}")
+            self.lbl_high_low.setText(
+                f"High: {format_price(hi_val, summary.currency)} | Low: {format_price(lo_val, summary.currency)}"
+            )
 
             # Performance color based on period open vs latest close
             p_start = prices[0]
@@ -613,7 +681,20 @@ class MainWindow(QMainWindow):
                     self.lbl_change.setObjectName("changeNeutral")
                 self.lbl_change.setStyle(self.lbl_change.style())
 
-            self.chart_widget.set_data(timestamps, prices, date_labels, line_color=color)
+            ohlc = None
+            if self._active_chart_type == ChartType.CANDLE:
+                opens, highs, lows = self.market_data_service.get_chart_ohlcv(
+                    symbol, self._active_range
+                )
+                ohlc = (opens, highs, lows)
+            self.chart_widget.set_data(
+                timestamps,
+                prices,
+                date_labels,
+                line_color=color,
+                chart_type=self._active_chart_type,
+                ohlc=ohlc,
+            )
 
             # Volume bars from the same local OHLCV rows (no extra API call)
             volumes, opens, closes = self.market_data_service.get_chart_volume(
@@ -784,7 +865,7 @@ class MainWindow(QMainWindow):
             return
 
         if summary.current_price is not None:
-            self.lbl_price.setText(f"${summary.current_price:,.2f}")
+            self.lbl_price.setText(format_price(summary.current_price, summary.currency))
             if summary.price_change is not None and summary.pct_change is not None:
                 chg_str = f"{summary.price_change:+.2f} ({summary.pct_change:+.2f}%)"
                 if summary.pct_change > 0:
@@ -836,7 +917,8 @@ class MainWindow(QMainWindow):
 
     def _on_chart_hover_changed(self, dt_str: str, price: float) -> None:
         """Dynamically updates header card to display exact hovered date & price."""
-        self.lbl_price.setText(f"${price:,.2f}")
+        currency = self._current_summary.currency if self._current_summary else None
+        self.lbl_price.setText(format_price(price, currency))
         self.lbl_last_sync.setText(f"Date: {dt_str}")
 
         if self._period_start_price and self._period_start_price > 0:
@@ -867,6 +949,17 @@ class MainWindow(QMainWindow):
         selected_symbol = self.ticker_list.get_selected_symbol()
         if selected_symbol:
             self._on_ticker_selected(selected_symbol)
+
+    def _on_chart_type_changed(self, index: int) -> None:
+        chart_type = self.combo_chart_type.itemData(index)
+        if not chart_type:
+            return
+        self._active_chart_type = chart_type
+        self.ticker_service.set_chart_type(chart_type)
+        selected_symbol = self.ticker_list.get_selected_symbol()
+        if selected_symbol:
+            self._on_ticker_selected(selected_symbol)
+        self.status_bar.showMessage(f"Chart type set to {chart_type.value}.")
 
     def _on_refresh_chart(self) -> None:
         selected_symbol = self.ticker_list.get_selected_symbol()

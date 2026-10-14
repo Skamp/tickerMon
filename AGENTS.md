@@ -21,7 +21,7 @@ Beyond raw price charts it provides:
 
 ## Key Modules
 - `app/ui/main_window.py` - Toolbar (Filter / Swing / Duration rows), sidebar wiring, overlay refresh.
-- `app/ui/chart_widget.py` - Price curve, filter overlay, swing overlay (zigzag, leg bands, annotation), fit-view zoom limits, embedded volume panel.
+- `app/ui/chart_widget.py` - Price curve (Line/Candle/Baseline modes via `ChartType`), filter overlay, swing overlay (zigzag, leg bands, annotation), fit-view zoom limits, embedded volume panel.
 - `app/ui/volume_chart_widget.py` - `VolumeChartWidget` (volume bars, K/M/B axis, legend, tooltip), `format_volume()`, `classify_volume_pressure()`.
 - `app/ui/ticker_list.py` / `app/ui/trend_filter_bar.py` - Sidebar list with trend/swing filtering and selection preservation.
 - `app/ui/filter_settings_dialog.py` / `app/ui/swing_settings_dialog.py` - Visibility + parameter dialogs.
@@ -61,7 +61,7 @@ You can also run with unittest (as documented in README):
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Test modules: `test_config.py`, `test_database.py`, `test_market_data.py`, `test_noise_reduction.py`, `test_swing_detection.py`, `test_ticker_list.py`, `test_time_ranges.py`, `test_volume_chart.py`.
+Test modules: `test_chart_type.py`, `test_config.py`, `test_database.py`, `test_market_data.py`, `test_noise_reduction.py`, `test_swing_detection.py`, `test_ticker_list.py`, `test_time_ranges.py`, `test_volume_chart.py`.
 
 ## Project Conventions
 - Follow PEP 8 style guidelines with 4-space indentation.

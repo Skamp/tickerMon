@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Tuple, Optional
 from app.config.config_manager import ConfigManager
+from app.models.chart_type import ChartType
 from app.models.ticker import TickerConfig
 from app.services.noise_reduction import NoiseReductionAlgorithm
 from app.services.swing_detection import (
@@ -94,6 +95,15 @@ class TickerService:
         self.selected_ticker = selected_ticker
         self.selected_range = selected_range
         self._save()
+
+    def get_chart_type(self) -> ChartType:
+        stored = self.config_manager.load_chart_type()
+        if not isinstance(stored, str):
+            return ChartType.LINE
+        return ChartType.from_str(stored)
+
+    def set_chart_type(self, chart_type: ChartType) -> bool:
+        return self.config_manager.save_chart_type(chart_type.value)
 
     def get_enabled_filters(self) -> List[str]:
         stored = self.config_manager.load_enabled_filters()
