@@ -128,7 +128,7 @@ class VolumeChartWidget(QWidget):
     module docstring). The horizontal (time) axis is owned by the price chart:
     ``StockChartWidget`` X-links this panel's ViewBox to the price ViewBox, so
     ticker, range, zoom and duration changes keep both charts on the same time
-    scale. This panel only allows vertical zoom/pan to preserve that sync.
+    scale. Mouse zoom/pan is disabled on this panel to preserve that sync.
     """
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -165,9 +165,9 @@ class VolumeChartWidget(QWidget):
         self.plot_item.showGrid(x=True, y=True, alpha=0.10)
         self.plot_item.setMenuEnabled(False)
         self.plot_item.vb.setMenuEnabled(False)
-        # Time (X) follows the linked price chart; only vertical zoom/pan is
-        # enabled here so both charts stay synchronized.
-        self.plot_item.vb.setMouseEnabled(x=False, y=True)
+        # Both axes follow the linked price chart; mouse zoom/pan is disabled
+        # here so the panel cannot desynchronize from the price chart.
+        self.plot_item.vb.setMouseEnabled(x=False, y=False)
         # Never let this panel auto-range its own time axis: the X range comes
         # exclusively from the price chart, Y is fitted manually below.
         self.plot_item.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=False)
