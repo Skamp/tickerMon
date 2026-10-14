@@ -37,7 +37,17 @@ from app.services.swing_detection import (
     describe_swing_range,
     format_swing_params,
 )
-from app.ui.ticker_list import TickerListWidget
+from app.ui.ticker_list import (
+    TickerListWidget,
+    SORT_BY_TICKER,
+    SORT_BY_DATE_ASC,
+    SORT_BY_DATE_DESC,
+    SORT_BY_NAME,
+    SORT_BY_PRICE_ASC,
+    SORT_BY_PRICE_DESC,
+    SORT_BY_PERF_ASC,
+    SORT_BY_PERF_DESC,
+)
 from app.ui.chart_widget import StockChartWidget
 from app.ui.ticker_dialog import TickerAdminDialog
 from app.ui.filter_settings_dialog import FilterSettingsDialog
@@ -103,12 +113,23 @@ class MainWindow(QMainWindow):
         toolbar_layout.setContentsMargins(10, 8, 10, 8)
         toolbar_layout.setSpacing(12)
 
-        # Update Data Button
-        self.btn_update = QPushButton("Update Data", toolbar_frame)
+        # Update Buttons (stacked: all tickers over new tickers)
+        update_button_stack = QVBoxLayout()
+        update_button_stack.setSpacing(4)
+
+        self.btn_update = QPushButton("Update all tickers", toolbar_frame)
         self.btn_update.setObjectName("updateButton")
         self.btn_update.setToolTip("Sync latest price data from Yahoo Finance (Ctrl+U)")
         self.btn_update.clicked.connect(self._on_update_clicked)
-        toolbar_layout.addWidget(self.btn_update)
+        update_button_stack.addWidget(self.btn_update)
+
+        self.btn_update_new = QPushButton("Update new tickers", toolbar_frame)
+        self.btn_update_new.setObjectName("updateButton")
+        self.btn_update_new.setToolTip("Download data only for tickers with no stored prices")
+        self.btn_update_new.clicked.connect(self._on_update_new_clicked)
+        update_button_stack.addWidget(self.btn_update_new)
+
+        toolbar_layout.addLayout(update_button_stack)
 
         toolbar_layout.addSpacing(15)
 
@@ -319,6 +340,50 @@ class MainWindow(QMainWindow):
         sidebar_header.setStyleSheet("font-size: 11px; font-weight: bold; color: #8b90a0; letter-spacing: 1px;")
         sidebar_layout.addWidget(sidebar_header)
 
+        sort_row = QHBoxLayout()
+        sort_row.setSpacing(6)
+
+        sort_label = QLabel("Sort:", sidebar_frame)
+        sort_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+        sort_row.addWidget(sort_label)
+
+        self.combo_sort = QComboBox(sidebar_frame)
+        self.combo_sort.setStyleSheet("""
+            QComboBox {
+                background-color: #252836;
+                color: #e1e3ea;
+                border: 1px solid #323647;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: 600;
+            }
+            QComboBox:hover {
+                border-color: #454b61;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1c24;
+                color: #e1e3ea;
+                selection-background-color: #2962ff;
+            }
+        """)
+        self.combo_sort.addItem("Sort by ticker", userData=SORT_BY_TICKER)
+        self.combo_sort.addItem("Sort by date ascending", userData=SORT_BY_DATE_ASC)
+        self.combo_sort.addItem("Sort by date descending", userData=SORT_BY_DATE_DESC)
+        self.combo_sort.addItem("Sort by company name", userData=SORT_BY_NAME)
+        self.combo_sort.addItem("Sort by price ascending", userData=SORT_BY_PRICE_ASC)
+        self.combo_sort.addItem("Sort by price descending", userData=SORT_BY_PRICE_DESC)
+        self.combo_sort.addItem("Sort by daily performance ascending", userData=SORT_BY_PERF_ASC)
+        self.combo_sort.addItem("Sort by daily performance descending", userData=SORT_BY_PERF_DESC)
+        self.combo_sort.setToolTip(
+            "Order of the market watch list.\n"
+            "Date = the day the ticker was added to the tool.\n"
+            "Price / performance = last stored values; unknown values are listed last."
+        )
+        self.combo_sort.currentIndexChanged.connect(self._on_sort_changed)
+        sort_row.addWidget(self.combo_sort, 1)
+
+        sidebar_layout.addLayout(sort_row)
+
         self.ticker_list = TickerListWidget(sidebar_frame)
         self.ticker_list.ticker_selected.connect(self._on_ticker_selected)
         sidebar_layout.addWidget(self.ticker_list)
@@ -484,6 +549,13 @@ class MainWindow(QMainWindow):
             include_swing=self.trend_filter_bar.swing_active(),
         )
 
+    def _on_sort_changed(self, index: int) -> None:
+        mode = self.combo_sort.itemData(index)
+        if not mode:
+            return
+        self.ticker_list.set_sort_mode(mode)
+        self.status_bar.showMessage(f"Market watch sorted by {self.combo_sort.itemText(index).lower()}.")
+
     def _on_ticker_selected(self, symbol: str) -> None:
         """Fast offline chart update when selected ticker changes."""
         enabled_configs = self.ticker_service.get_enabled_tickers()
@@ -513,7 +585,7 @@ class MainWindow(QMainWindow):
             self.chart_widget.clear_swing_overlay()
             self.chart_widget.show_empty_state(
                 True,
-                f"No local market data available for '{symbol}'.\nPress 'Update Data' (Ctrl+U) to download prices from Yahoo Finance."
+                f"No local market data available for '{symbol}'.\nPress 'Update all tickers' (Ctrl+U) to download prices from Yahoo Finance."
             )
             self.status_bar.showMessage(f"No local data stored for {symbol}.")
         else:
@@ -746,7 +818,7 @@ class MainWindow(QMainWindow):
                 object_name = "changeNeutral"
                 tooltip = (
                     f"Not enough local history for {key}. "
-                    "Press Update Data (Ctrl+U) to download more."
+                    "Press 'Update all tickers' (Ctrl+U) to download more."
                 )
             else:
                 label.setText(f"{pct:+.2f}%")
@@ -832,14 +904,28 @@ class MainWindow(QMainWindow):
             )
 
     def _on_update_clicked(self) -> None:
+        self._run_update(self.ticker_service.get_enabled_tickers())
+
+    def _on_update_new_clicked(self) -> None:
         enabled_configs = self.ticker_service.get_enabled_tickers()
-        if not enabled_configs:
+        missing_configs = self.market_data_service.get_tickers_without_data(enabled_configs)
+        if not missing_configs:
+            QMessageBox.information(
+                self,
+                "No New Tickers",
+                "Every enabled ticker already has price data in the local database.",
+            )
+            return
+        self._run_update(missing_configs)
+
+    def _run_update(self, configs: List[TickerConfig]) -> None:
+        if not configs:
             QMessageBox.information(self, "No Enabled Tickers", "Please enable or add at least one ticker in Manage Tickers.")
             return
 
-        progress_dlg = UpdateProgressDialog(enabled_configs, self)
+        progress_dlg = UpdateProgressDialog(configs, self)
 
-        self._update_worker = UpdateWorker(self.sync_service, enabled_configs)
+        self._update_worker = UpdateWorker(self.sync_service, configs)
         self._update_worker.ticker_started.connect(progress_dlg.on_ticker_started)
         self._update_worker.ticker_finished.connect(progress_dlg.on_ticker_finished)
         self._update_worker.overall_completed.connect(progress_dlg.on_overall_completed)

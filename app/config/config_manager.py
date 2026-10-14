@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 from app.models.ticker import TickerConfig
@@ -180,14 +181,15 @@ class ConfigManager:
             return {}
 
     def _create_default_config(self) -> Tuple[List[TickerConfig], str, str]:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         defaults = [
-            TickerConfig("AAPL", "Apple Inc.", True),
-            TickerConfig("MSFT", "Microsoft Corporation", True),
-            TickerConfig("NVDA", "NVIDIA Corporation", True),
-            TickerConfig("GOOGL", "Alphabet Inc.", True),
-            TickerConfig("AMZN", "Amazon.com Inc.", True),
-            TickerConfig("TSLA", "Tesla Inc.", True),
-            TickerConfig("META", "Meta Platforms Inc.", True),
+            TickerConfig("AAPL", "Apple Inc.", True, now_str),
+            TickerConfig("MSFT", "Microsoft Corporation", True, now_str),
+            TickerConfig("NVDA", "NVIDIA Corporation", True, now_str),
+            TickerConfig("GOOGL", "Alphabet Inc.", True, now_str),
+            TickerConfig("AMZN", "Amazon.com Inc.", True, now_str),
+            TickerConfig("TSLA", "Tesla Inc.", True, now_str),
+            TickerConfig("META", "Meta Platforms Inc.", True, now_str),
         ]
         self.save_config(defaults, "AAPL", "1Y")
         return defaults, "AAPL", "1Y"

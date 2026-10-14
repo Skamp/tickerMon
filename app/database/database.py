@@ -2,7 +2,13 @@ import sqlite3
 import logging
 from pathlib import Path
 from typing import Optional
-from app.database.schema import CREATE_PRICES_TABLE, CREATE_PRICES_INDEX, CREATE_METADATA_TABLE
+from app.database.schema import (
+    CREATE_PRICES_TABLE,
+    CREATE_PRICES_INDEX,
+    CREATE_METADATA_TABLE,
+    ADD_FIRST_DOWNLOAD_COLUMN,
+    FILL_FIRST_DOWNLOAD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +37,17 @@ class Database:
                 cursor.execute(CREATE_PRICES_TABLE)
                 cursor.execute(CREATE_PRICES_INDEX)
                 cursor.execute(CREATE_METADATA_TABLE)
+                self._migrate_metadata_table(cursor)
                 conn.commit()
             logger.info(f"Database schema initialized successfully at {self.db_path}")
         except Exception as e:
             logger.error(f"Error initializing database schema: {e}")
             raise
+
+    @staticmethod
+    def _migrate_metadata_table(cursor: sqlite3.Cursor) -> None:
+        columns = {row["name"] for row in cursor.execute("PRAGMA table_info(ticker_metadata);")}
+        if "first_download" not in columns:
+            cursor.execute(ADD_FIRST_DOWNLOAD_COLUMN)
+            cursor.execute(FILL_FIRST_DOWNLOAD)
+            logger.info("Migrated ticker_metadata with first_download column.")

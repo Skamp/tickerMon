@@ -137,7 +137,7 @@ class StockChartWidget(QWidget):
         self.tooltip_text.setVisible(False)
 
         # Empty State Label
-        self.empty_label = QLabel("No local data available.\nPress 'Update Data' to download historical prices.", self)
+        self.empty_label = QLabel("No local data available.\nPress 'Update all tickers' to download historical prices.", self)
         self.empty_label.setAlignment(Qt.AlignCenter)
         self.empty_label.setStyleSheet("font-size: 15px; color: #8b90a0; background-color: #121318;")
         self.layout.addWidget(self.empty_label)

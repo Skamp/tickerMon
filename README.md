@@ -209,7 +209,8 @@ Tracks synchronization timestamps and download status for each ticker symbol.
 ## 🌐 Yahoo Finance Integration & Sync Strategy
 
 - Data fetching is handled by `yfinance`.
-- Clicking **Update Data** (`Ctrl+U`) downloads missing price records incrementally based on the latest stored local timestamp.
+- Clicking **Update all tickers** (`Ctrl+U`) downloads missing price records incrementally based on the latest stored local timestamp.
+- Clicking **Update new tickers** only downloads data for enabled tickers that have no price rows in the local database yet (newly added symbols).
 - Errors (e.g., rate limits, invalid symbols, delisted securities) are logged to `logs/app.log` without crashing the GUI.
 
 ---
@@ -257,6 +258,8 @@ Below the price chart a compact `VolumeChartWidget` renders one bar per price pe
 
 Filters combine with OR, preserve the current selection when possible (falling back to the first visible ticker), and are recomputed whenever the time range, swing algorithm, or settings change.
 
+A **Sort** combo below the `MARKET WATCH` header orders the list by ticker, by date ascending, or by date descending. The date is the moment the ticker was added to the tool (stored as `added_at` in `config/tickers.json`); tickers added before this field existed have no date and are grouped first when sorting ascending, last when descending.
+
 ---
 
 ## ⌨️ Keyboard Shortcuts
@@ -268,7 +271,7 @@ Filters combine with OR, preserve the current selection when possible (falling b
 | `Home` | Select first ticker in list |
 | `End` | Select last ticker in list |
 | `R` | Refresh current chart from local database |
-| `Ctrl+U` | Trigger "Update Data" market sync |
+| `Ctrl+U` | Trigger "Update all tickers" market sync |
 | `Ctrl+T` | Open Ticker Administration dialog |
 | `Ctrl+Q` | Quit application |
 
@@ -297,6 +300,7 @@ Test modules:
 | `tests/test_market_data.py` | Chart data, OHLCV alignment, trend bucketing, swing symbols & overlay |
 | `tests/test_noise_reduction.py` | Every noise-reduction algorithm |
 | `tests/test_swing_detection.py` | All 22 swing detectors, parameter specs, duration range filtering |
+| `tests/test_ticker_list.py` | Sidebar sorting by ticker and by added date |
 | `tests/test_time_ranges.py` | Time range boundaries |
 | `tests/test_volume_chart.py` | Volume formatting, pressure classification & bar width |
 

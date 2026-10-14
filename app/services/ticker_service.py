@@ -1,5 +1,6 @@
 import re
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Tuple, Optional
 from app.config.config_manager import ConfigManager
 from app.models.ticker import TickerConfig
@@ -38,7 +39,12 @@ class TickerService:
                 return False, f"Ticker {clean_symbol} already exists."
 
         display_name = name.strip() if name and name.strip() else clean_symbol
-        new_config = TickerConfig(symbol=clean_symbol, name=display_name, enabled=True)
+        new_config = TickerConfig(
+            symbol=clean_symbol,
+            name=display_name,
+            enabled=True,
+            added_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
         self.tickers.append(new_config)
         self._save()
         return True, f"Added ticker {clean_symbol}"

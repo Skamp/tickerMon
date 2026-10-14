@@ -7,12 +7,14 @@ class TickerConfig:
     symbol: str
     name: str
     enabled: bool = True
+    added_at: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
             "symbol": self.symbol.upper().strip(),
             "name": self.name.strip(),
             "enabled": self.enabled,
+            "added_at": self.added_at,
         }
 
     @classmethod
@@ -21,6 +23,7 @@ class TickerConfig:
             symbol=data.get("symbol", "").upper().strip(),
             name=data.get("name", "").strip(),
             enabled=data.get("enabled", True),
+            added_at=data.get("added_at"),
         )
 
 
@@ -36,3 +39,4 @@ class TickerSummary:
     last_updated: Optional[str] = None
     status: str = "OK"
     error_message: Optional[str] = None
+    added_at: Optional[str] = None

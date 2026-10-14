@@ -17,6 +17,54 @@ from app.models.trend import TrendBucket
 
 logger = logging.getLogger(__name__)
 
+SORT_BY_TICKER = "ticker"
+SORT_BY_DATE_ASC = "date_asc"
+SORT_BY_DATE_DESC = "date_desc"
+SORT_BY_NAME = "name"
+SORT_BY_PRICE_ASC = "price_asc"
+SORT_BY_PRICE_DESC = "price_desc"
+SORT_BY_PERF_ASC = "perf_asc"
+SORT_BY_PERF_DESC = "perf_desc"
+
+SORT_MODES = (
+    SORT_BY_TICKER,
+    SORT_BY_DATE_ASC,
+    SORT_BY_DATE_DESC,
+    SORT_BY_NAME,
+    SORT_BY_PRICE_ASC,
+    SORT_BY_PRICE_DESC,
+    SORT_BY_PERF_ASC,
+    SORT_BY_PERF_DESC,
+)
+
+
+def _numeric_sort_key(value: Optional[float], reverse: bool):
+    if value is None:
+        return (1, 0.0)
+    return (0, -value if reverse else value)
+
+
+def sort_ticker_summaries(summaries: List[TickerSummary], mode: str) -> List[TickerSummary]:
+    """Returns summaries ordered by symbol, added date, company name, price or daily performance."""
+    items = list(summaries)
+    if mode in (SORT_BY_DATE_ASC, SORT_BY_DATE_DESC):
+        items.sort(key=lambda s: s.symbol)
+        items.sort(key=lambda s: s.added_at or "", reverse=(mode == SORT_BY_DATE_DESC))
+    elif mode == SORT_BY_NAME:
+        items.sort(key=lambda s: s.symbol)
+        items.sort(key=lambda s: (s.company_name or "").casefold())
+    elif mode in (SORT_BY_PRICE_ASC, SORT_BY_PRICE_DESC):
+        reverse = mode == SORT_BY_PRICE_DESC
+        items.sort(key=lambda s: s.symbol)
+        items.sort(key=lambda s: _numeric_sort_key(s.current_price, reverse))
+    elif mode in (SORT_BY_PERF_ASC, SORT_BY_PERF_DESC):
+        reverse = mode == SORT_BY_PERF_DESC
+        items.sort(key=lambda s: s.symbol)
+        items.sort(key=lambda s: _numeric_sort_key(s.pct_change, reverse))
+    else:
+        items.sort(key=lambda s: s.symbol)
+    return items
+
 
 class TickerItemDelegate(QStyledItemDelegate):
     """Custom delegate for rendering ticker symbol, name, price, and daily change in the sidebar."""
@@ -119,8 +167,16 @@ class TickerListWidget(QListWidget):
         self._swing_symbols: Set[str] = set()
         self._active_buckets: Set[TrendBucket] = set()
         self._swing_active: bool = False
+        self._sort_mode: str = SORT_BY_TICKER
 
         self.currentItemChanged.connect(self._on_item_changed)
+
+    def set_sort_mode(self, mode: str) -> None:
+        """Reorders the list using the requested sort mode."""
+        if mode not in SORT_MODES or mode == self._sort_mode:
+            return
+        self._sort_mode = mode
+        self._repopulate(self.get_selected_symbol())
 
     def update_summaries(
         self,
@@ -147,13 +203,14 @@ class TickerListWidget(QListWidget):
         prev_symbol = self.get_selected_symbol()
         target_sym = select_symbol.upper().strip() if select_symbol else prev_symbol
         filtered = bool(self._active_buckets) or self._swing_active
+        ordered = sort_ticker_summaries(self._summaries, self._sort_mode)
 
         self.blockSignals(True)
         self.clear()
 
         selected_item = None
         first_item = None
-        for summary in self._summaries:
+        for summary in ordered:
             if filtered:
                 in_trend = self._trends.get(summary.symbol) in self._active_buckets
                 in_swing = self._swing_active and summary.symbol in self._swing_symbols
@@ -163,6 +220,10 @@ class TickerListWidget(QListWidget):
             item = QListWidgetItem()
             item.setData(Qt.UserRole, summary)
             item.setText(summary.symbol)
+            item.setToolTip(
+                f"{summary.symbol}\nAdded: {summary.added_at}" if summary.added_at
+                else f"{summary.symbol}\nAdded: unknown"
+            )
             self.addItem(item)
 
             if first_item is None:

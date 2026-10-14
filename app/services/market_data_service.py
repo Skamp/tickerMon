@@ -83,6 +83,7 @@ class MarketDataService:
         last_updated = meta.get("last_download")
         status = meta.get("status", "OK")
         error_msg = meta.get("error_message")
+        effective_added_at = config.added_at or meta.get("first_download")
 
         latest_point = self.repo.get_latest_price_point(sym)
         if not latest_point:
@@ -97,6 +98,7 @@ class MarketDataService:
                 last_updated=last_updated,
                 status=status if status != "OK" else "NO_DATA",
                 error_message=error_msg,
+                added_at=effective_added_at,
             )
 
         current_price = latest_point.adj_close or latest_point.close
@@ -124,10 +126,15 @@ class MarketDataService:
             last_updated=last_updated,
             status=status,
             error_message=error_msg,
+            added_at=effective_added_at,
         )
 
     def get_all_summaries(self, configs: List[TickerConfig]) -> List[TickerSummary]:
         return [self.get_ticker_summary(cfg) for cfg in configs]
+
+    def get_tickers_without_data(self, configs: List[TickerConfig]) -> List[TickerConfig]:
+        """Returns enabled tickers that have no price rows stored locally yet."""
+        return [cfg for cfg in configs if not self.repo.has_price_data(cfg.symbol)]
 
     def get_performance(self, symbol: str) -> Dict[str, Optional[float]]:
         """

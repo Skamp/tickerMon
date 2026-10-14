@@ -190,6 +190,19 @@ class MarketDataRepository:
             logger.error(f"Error getting first timestamp for {clean_symbol}: {e}")
         return None
 
+    def has_price_data(self, symbol: str) -> bool:
+        """Returns True when at least one price row is stored for the ticker."""
+        clean_symbol = symbol.upper().strip()
+        sql = "SELECT 1 FROM prices WHERE symbol = ? LIMIT 1;"
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, [clean_symbol])
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking price data for {clean_symbol}: {e}")
+            return False
+
     def update_ticker_metadata(
         self,
         symbol: str,
@@ -207,13 +220,14 @@ class MarketDataRepository:
         last_dl = last_download or now_str
 
         sql = """
-        INSERT INTO ticker_metadata (symbol, company_name, currency, exchange, last_download, last_data_timestamp, status, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO ticker_metadata (symbol, company_name, currency, exchange, last_download, first_download, last_data_timestamp, status, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(symbol) DO UPDATE SET
             company_name = COALESCE(excluded.company_name, ticker_metadata.company_name),
             currency = COALESCE(excluded.currency, ticker_metadata.currency),
             exchange = COALESCE(excluded.exchange, ticker_metadata.exchange),
             last_download = excluded.last_download,
+            first_download = COALESCE(ticker_metadata.first_download, excluded.first_download),
             last_data_timestamp = COALESCE(excluded.last_data_timestamp, ticker_metadata.last_data_timestamp),
             status = excluded.status,
             error_message = excluded.error_message;
@@ -222,7 +236,8 @@ class MarketDataRepository:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql, (
-                    clean_symbol, company_name, currency, exchange, last_dl, last_data_timestamp, status, error_message
+                    clean_symbol, company_name, currency, exchange, last_dl, now_str,
+                    last_data_timestamp, status, error_message
                 ))
                 conn.commit()
         except Exception as e:

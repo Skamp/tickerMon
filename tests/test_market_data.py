@@ -60,6 +60,48 @@ class TestMarketData(unittest.TestCase):
         self.assertEqual(summary.price_change, 10.0)
         self.assertEqual(summary.pct_change, 10.0)
 
+    def test_summary_added_at_sources(self):
+        dates = pd.date_range("2026-01-01", periods=2, freq="D")
+        df = pd.DataFrame({
+            "Open": [100.0, 105.0],
+            "High": [105.0, 110.0],
+            "Low": [99.0, 104.0],
+            "Close": [100.0, 110.0],
+            "Adj Close": [100.0, 110.0],
+            "Volume": [1000, 1500],
+        }, index=dates)
+        self.repo.upsert_price_data("AMZN", df)
+        self.repo.update_ticker_metadata(symbol="AMZN", company_name="Amazon")
+
+        first_download = self.repo.get_ticker_metadata("AMZN")["first_download"]
+        self.assertIsNotNone(first_download)
+
+        undated = TickerConfig("AMZN", "Amazon.com Inc.", True)
+        self.assertEqual(self.market_data_service.get_ticker_summary(undated).added_at, first_download)
+
+        dated = TickerConfig("AMZN", "Amazon.com Inc.", True, added_at="2020-01-01 00:00:00")
+        self.assertEqual(self.market_data_service.get_ticker_summary(dated).added_at, "2020-01-01 00:00:00")
+
+    def test_get_tickers_without_data(self):
+        dates = pd.date_range("2026-01-01", periods=2, freq="D")
+        df = pd.DataFrame({
+            "Open": [100.0, 105.0],
+            "High": [105.0, 110.0],
+            "Low": [99.0, 104.0],
+            "Close": [100.0, 110.0],
+            "Adj Close": [100.0, 110.0],
+            "Volume": [1000, 1500],
+        }, index=dates)
+        self.repo.upsert_price_data("AAPL", df)
+
+        configs = [
+            TickerConfig("AAPL", "Apple Inc.", True),
+            TickerConfig("TSLA", "Tesla, Inc.", True),
+        ]
+        missing = self.market_data_service.get_tickers_without_data(configs)
+        self.assertEqual([cfg.symbol for cfg in missing], ["TSLA"])
+        self.assertEqual(self.market_data_service.get_tickers_without_data([]), [])
+
     def test_mocked_sync_service(self):
         mock_yahoo = MagicMock(spec=YahooService)
         dates = pd.date_range("2026-01-01", periods=3, freq="D")

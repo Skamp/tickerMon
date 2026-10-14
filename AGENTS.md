@@ -61,7 +61,7 @@ You can also run with unittest (as documented in README):
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Test modules: `test_config.py`, `test_database.py`, `test_market_data.py`, `test_noise_reduction.py`, `test_swing_detection.py`, `test_time_ranges.py`, `test_volume_chart.py`.
+Test modules: `test_config.py`, `test_database.py`, `test_market_data.py`, `test_noise_reduction.py`, `test_swing_detection.py`, `test_ticker_list.py`, `test_time_ranges.py`, `test_volume_chart.py`.
 
 ## Project Conventions
 - Follow PEP 8 style guidelines with 4-space indentation.

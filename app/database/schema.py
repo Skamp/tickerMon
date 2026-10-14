@@ -25,8 +25,13 @@ CREATE TABLE IF NOT EXISTS ticker_metadata (
     currency TEXT,
     exchange TEXT,
     last_download TEXT,
+    first_download TEXT,
     last_data_timestamp TEXT,
     status TEXT DEFAULT 'OK',
     error_message TEXT
 );
 """
+
+ADD_FIRST_DOWNLOAD_COLUMN = "ALTER TABLE ticker_metadata ADD COLUMN first_download TEXT;"
+
+FILL_FIRST_DOWNLOAD = "UPDATE ticker_metadata SET first_download = last_download WHERE first_download IS NULL;"

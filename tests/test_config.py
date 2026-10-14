@@ -260,6 +260,29 @@ class TestConfig(unittest.TestCase):
         reloaded = TickerService(self.config_manager)
         self.assertEqual(reloaded.get_swing_range_settings(), settings)
 
+    def test_added_at_recorded_on_add_and_persisted(self):
+        service = TickerService(self.config_manager)
+        ok, _ = service.add_ticker("IBM", "International Business Machines")
+        self.assertTrue(ok)
+
+        added = next(t for t in service.get_all_tickers() if t.symbol == "IBM")
+        self.assertIsNotNone(added.added_at)
+
+        service.update_ticker("IBM", "IBM Corporation", True)
+        reloaded = TickerService(self.config_manager)
+        stored = next(t for t in reloaded.get_all_tickers() if t.symbol == "IBM")
+        self.assertEqual(stored.added_at, added.added_at)
+
+    def test_added_at_none_for_entries_without_field(self):
+        legacy = {"symbol": "AAPL", "name": "Apple Inc.", "enabled": True}
+        self.assertIsNone(TickerConfig.from_dict(legacy).added_at)
+
+    def test_default_config_stamps_added_at(self):
+        tickers, _, _ = self.config_manager.load_config()
+        self.assertTrue(tickers)
+        for ticker in tickers:
+            self.assertIsNotNone(ticker.added_at)
+
 
 if __name__ == "__main__":
     unittest.main()
