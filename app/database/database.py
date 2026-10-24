@@ -8,6 +8,8 @@ from app.database.schema import (
     CREATE_METADATA_TABLE,
     ADD_FIRST_DOWNLOAD_COLUMN,
     FILL_FIRST_DOWNLOAD,
+    CREATE_EARNINGS_TABLE,
+    CREATE_EARNINGS_META_TABLE,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,8 @@ class Database:
                 cursor.execute(CREATE_PRICES_TABLE)
                 cursor.execute(CREATE_PRICES_INDEX)
                 cursor.execute(CREATE_METADATA_TABLE)
+                cursor.execute(CREATE_EARNINGS_TABLE)
+                cursor.execute(CREATE_EARNINGS_META_TABLE)
                 self._migrate_metadata_table(cursor)
                 conn.commit()
             logger.info(f"Database schema initialized successfully at {self.db_path}")

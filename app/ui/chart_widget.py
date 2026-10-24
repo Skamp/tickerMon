@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGraphicsRectItem
 import pyqtgraph as pg
 
 from app.models.chart_type import ChartType
+from app.models.earnings import EarningsEvent, format_earnings_tooltip
 from app.utils.currency import get_currency_symbol
 from app.ui.volume_chart_widget import (
     BUY_COLOR,
@@ -33,6 +34,15 @@ CANDLE_NEUTRAL = "neutral"
 _CANDLE_KINDS = (CANDLE_BULLISH, CANDLE_BEARISH, CANDLE_NEUTRAL)
 _MIN_BODY_HEIGHT_RATIO = 0.004
 _ABS_MIN_BODY_HEIGHT = 0.01
+
+ATR2_COLOR = "#29b6f6"
+ATR4_COLOR = "#ab47bc"
+EMA20_COLOR = "#26c6da"
+
+EARNINGS_CONFIRMED_COLOR = "#ffca28"
+EARNINGS_ESTIMATED_COLOR = "#78909c"
+
+_LEVEL_NEUTRAL_COLOR = "#8b90a0"
 
 
 def _is_valid_ohlc(open_value, high_value, low_value, close_value) -> bool:
@@ -355,6 +365,64 @@ class StockChartWidget(QWidget):
         self.overlay_pen.setCosmetic(True)
         self.overlay_curve = self.plot_item.plot(pen=self.overlay_pen)
         self.overlay_curve.setVisible(False)
+        self._overlay_label = "Filtered"
+
+        # ATR volatility band overlay (upper/lower curves + subtle fill)
+        self._atr_upper_pen = QPen(QColor(ATR2_COLOR))
+        self._atr_upper_pen.setWidthF(1.0)
+        self._atr_upper_pen.setCosmetic(True)
+        self._atr_lower_pen = QPen(QColor(ATR2_COLOR))
+        self._atr_lower_pen.setWidthF(1.0)
+        self._atr_lower_pen.setCosmetic(True)
+        self._atr_upper_curve = self.plot_item.plot(pen=self._atr_upper_pen)
+        self._atr_lower_curve = self.plot_item.plot(pen=self._atr_lower_pen)
+        self._atr_fill = pg.FillBetweenItem(
+            self._atr_upper_curve, self._atr_lower_curve, brush=pg.mkBrush(QColor(0, 0, 0, 0))
+        )
+        self.plot_item.addItem(self._atr_fill, ignoreBounds=True)
+        self._atr_upper_curve.setVisible(False)
+        self._atr_lower_curve.setVisible(False)
+        self._atr_fill.setVisible(False)
+        self._atr_upper: List[Optional[float]] = []
+        self._atr_lower: List[Optional[float]] = []
+        self._atr_label = ""
+
+        # Swing levels: latest confirmed high/low as horizontal price lines
+        self._swing_high_line = pg.InfiniteLine(angle=0, movable=False)
+        self._swing_low_line = pg.InfiniteLine(angle=0, movable=False)
+        self.plot_item.addItem(self._swing_high_line, ignoreBounds=True)
+        self.plot_item.addItem(self._swing_low_line, ignoreBounds=True)
+        self._swing_high_line.setVisible(False)
+        self._swing_low_line.setVisible(False)
+
+        self._swing_high_text = pg.TextItem(
+            text="", anchor=(1.0, 1.35), color="#ffffff", fill=pg.mkBrush("#1a1c24f0")
+        )
+        self._swing_low_text = pg.TextItem(
+            text="", anchor=(1.0, -0.35), color="#ffffff", fill=pg.mkBrush("#1a1c24f0")
+        )
+        self.plot_item.addItem(self._swing_high_text, ignoreBounds=True)
+        self.plot_item.addItem(self._swing_low_text, ignoreBounds=True)
+        self._swing_high_text.setVisible(False)
+        self._swing_low_text.setVisible(False)
+        self._swing_level_high = None
+        self._swing_level_low = None
+        self._swing_reference_close: Optional[float] = None
+
+        # Market structure labels (HH/HL/LH/LL/M) near confirmed pivots
+        self._structure_items: List[pg.TextItem] = []
+        self._structure_visible = True
+
+        # Earnings event markers along the time axis
+        self._earnings_items: List[Tuple[pg.TextItem, float]] = []
+        self._earnings_events: List[EarningsEvent] = []
+        self._earnings_symbol = ""
+        self._earnings_company: Optional[str] = None
+        self._earnings_tooltip = pg.TextItem(
+            text="", anchor=(0.5, 1.2), color="#ffffff", fill=pg.mkBrush("#1a1c24f0")
+        )
+        self.plot_item.addItem(self._earnings_tooltip, ignoreBounds=True)
+        self._earnings_tooltip.setVisible(False)
 
         # Swing Overlay: zigzag line + pivot markers (Violet stroke)
         swing_color = QColor("#e040fb")
@@ -433,6 +501,10 @@ class StockChartWidget(QWidget):
 
         # Keep the swing parameter text anchored to the top-left of the visible view
         self.plot_item.vb.sigRangeChanged.connect(self._position_swing_text)
+        # Swing level annotations stay pinned to the right edge; earnings markers
+        # stay pinned just above the bottom of the price pane.
+        self.plot_item.vb.sigRangeChanged.connect(self._position_level_texts)
+        self.plot_item.vb.sigRangeChanged.connect(self._position_earnings_markers)
 
     def set_currency(self, currency_code: Optional[str]) -> None:
         """Sets the currency symbol used by the Y-axis, tooltip and volume panel."""
@@ -466,10 +538,12 @@ class StockChartWidget(QWidget):
             self._view_bounds = None
             self._hide_candle_items()
             self._hide_baseline_items()
+            self._clear_earnings_markers()
             self.show_empty_state(True)
             return
 
         self.show_empty_state(False)
+        self._rebuild_earnings_markers()
 
         if chart_type == ChartType.CANDLE and self._render_candlestick(
             timestamps, prices, line_color, ohlc
@@ -666,6 +740,12 @@ class StockChartWidget(QWidget):
         if self._overlay_y:
             y_min = min(y_min, min(self._overlay_y))
             y_max = max(y_max, max(self._overlay_y))
+        atr_upper_valid = [v for v in self._atr_upper if v is not None and math.isfinite(v)]
+        atr_lower_valid = [v for v in self._atr_lower if v is not None and math.isfinite(v)]
+        if atr_upper_valid:
+            y_max = max(y_max, max(atr_upper_valid))
+        if atr_lower_valid:
+            y_min = min(y_min, min(atr_lower_valid))
 
         padding = (y_max - y_min) * 0.08 if y_max > y_min else y_max * 0.05
 
@@ -690,15 +770,26 @@ class StockChartWidget(QWidget):
             maxYRange=y_hi - y_lo,
         )
 
-    def set_overlay_data(self, timestamps: List[float], prices: List[float]) -> None:
-        """Sets and displays a secondary noise-reduced graph curve in Amber Gold."""
+    def set_overlay_data(
+        self,
+        timestamps: List[float],
+        prices: List[float],
+        color: str = "#ffab00",
+        label: str = "Filtered",
+    ) -> None:
+        """Sets and displays a secondary overlay curve (noise-reduced or EMA)."""
         self._overlay_x = timestamps
         self._overlay_y = prices
+        self._overlay_label = label
 
         if not timestamps or not prices:
             self.clear_overlay()
             return
 
+        pen_color = QColor(color)
+        self.overlay_pen.setColor(pen_color)
+        self.overlay_pen.setWidthF(1.8)
+        self.overlay_curve.setPen(self.overlay_pen)
         self.overlay_curve.setData(timestamps, prices)
         self.overlay_curve.setVisible(True)
         self._fit_view_to_data()
@@ -707,8 +798,224 @@ class StockChartWidget(QWidget):
         """Clears and hides the secondary overlay curve."""
         self._overlay_x = []
         self._overlay_y = []
+        self._overlay_label = "Filtered"
         self.overlay_curve.setVisible(False)
         self._fit_view_to_data()
+
+    def set_atr_overlay(
+        self,
+        timestamps: List[float],
+        upper: List[Optional[float]],
+        lower: List[Optional[float]],
+        label: str,
+        color: str,
+    ) -> None:
+        """Displays Close ± N×ATR14 volatility bands around the price series.
+
+        ``upper``/``lower`` are aligned bar-by-bar with ``timestamps``; None
+        entries render as gaps. The subtle fill between the bands marks the
+        volatility range without obscuring the price series or other overlays.
+        """
+        if not timestamps or not upper or not lower:
+            self.clear_atr_overlay()
+            return
+
+        count = min(len(timestamps), len(upper), len(lower))
+        xs = [float(t) for t in timestamps[:count]]
+
+        def _series(values: List[Optional[float]]) -> List[float]:
+            out: List[float] = []
+            for v in values[:count]:
+                if v is None:
+                    out.append(float("nan"))
+                else:
+                    try:
+                        out.append(float(v))
+                    except (TypeError, ValueError):
+                        out.append(float("nan"))
+            return out
+
+        self._atr_upper = list(upper[:count])
+        self._atr_lower = list(lower[:count])
+        self._atr_label = label
+
+        pen = QColor(color)
+        self._atr_upper_pen.setColor(pen)
+        self._atr_lower_pen.setColor(pen)
+        self._atr_upper_curve.setPen(self._atr_upper_pen)
+        self._atr_lower_curve.setPen(self._atr_lower_pen)
+        self._atr_upper_curve.setData(xs, _series(upper))
+        self._atr_lower_curve.setData(xs, _series(lower))
+        self._atr_upper_curve.setVisible(True)
+        self._atr_lower_curve.setVisible(True)
+
+        fill_color = QColor(color)
+        fill_color.setAlpha(22)
+        self._atr_fill.setBrush(pg.mkBrush(fill_color))
+        self._atr_fill.setVisible(True)
+        self._fit_view_to_data()
+
+    def clear_atr_overlay(self) -> None:
+        """Clears and hides the ATR volatility band overlay."""
+        self._atr_upper = []
+        self._atr_lower = []
+        self._atr_label = ""
+        self._atr_upper_curve.setData([], [])
+        self._atr_lower_curve.setData([], [])
+        self._atr_upper_curve.setVisible(False)
+        self._atr_lower_curve.setVisible(False)
+        self._atr_fill.setBrush(pg.mkBrush(QColor(0, 0, 0, 0)))
+        self._atr_fill.setVisible(False)
+        self._fit_view_to_data()
+
+    def set_structure_labels(
+        self, placements: List[Tuple[float, float, str, str]]
+    ) -> None:
+        """Renders market-structure labels at precomputed (x, y, text, color) positions."""
+        self.clear_structure_labels()
+        for x, y, text, color in placements:
+            item = pg.TextItem(
+                text=text, anchor=(0.5, 0.5), color=color, fill=pg.mkBrush("#1a1c24f0")
+            )
+            item.setPos(float(x), float(y))
+            item.setVisible(self._structure_visible)
+            self.plot_item.addItem(item, ignoreBounds=True)
+            self._structure_items.append(item)
+
+    def set_structure_labels_visible(self, visible: bool) -> None:
+        """Shows/hides structure labels without recomputing the swing structure."""
+        self._structure_visible = bool(visible)
+        for item in self._structure_items:
+            item.setVisible(self._structure_visible)
+
+    def clear_structure_labels(self) -> None:
+        """Removes all market-structure label items from the plot."""
+        for item in self._structure_items:
+            try:
+                self.plot_item.removeItem(item)
+            except Exception:
+                pass
+        self._structure_items = []
+
+    def set_earnings_events(
+        self,
+        events: List[EarningsEvent],
+        symbol: str,
+        company_name: Optional[str] = None,
+    ) -> None:
+        """Stores earnings events and renders markers for those in the visible range."""
+        self._earnings_events = list(events) if events else []
+        self._earnings_symbol = symbol
+        self._earnings_company = company_name
+        self._rebuild_earnings_markers()
+
+    def clear_earnings_events(self) -> None:
+        """Clears stored earnings events and removes their markers."""
+        self._earnings_events = []
+        self._earnings_symbol = ""
+        self._earnings_company = None
+        self._clear_earnings_markers()
+
+    def _clear_earnings_markers(self) -> None:
+        for item, _ in self._earnings_items:
+            try:
+                self.plot_item.removeItem(item)
+            except Exception:
+                pass
+        self._earnings_items = []
+        self._earnings_tooltip.setVisible(False)
+
+    def _rebuild_earnings_markers(self) -> None:
+        self._clear_earnings_markers()
+        if not self._earnings_events or not self._x_data:
+            return
+
+        x_lo = min(self._x_data)
+        x_hi = max(self._x_data)
+        seen_epochs = set()
+        for event in self._earnings_events:
+            epoch = event.epoch
+            if not math.isfinite(epoch) or epoch < x_lo or epoch > x_hi:
+                continue
+            if epoch in seen_epochs:
+                continue
+            seen_epochs.add(epoch)
+            color = EARNINGS_ESTIMATED_COLOR if event.is_estimated else EARNINGS_CONFIRMED_COLOR
+            item = pg.TextItem(text="E", anchor=(0.5, 0.5), color=color, fill=pg.mkBrush("#1a1c24f0"))
+            self.plot_item.addItem(item, ignoreBounds=True)
+            self._earnings_items.append((item, epoch))
+        self._position_earnings_markers()
+
+    def _position_earnings_markers(self, *args) -> None:
+        if not self._earnings_items:
+            return
+        x_lo, x_hi = self.plot_item.vb.viewRange()[0]
+        y_lo, y_hi = self.plot_item.vb.viewRange()[1]
+        if x_hi <= x_lo or y_hi <= y_lo:
+            return
+        marker_y = y_lo + (y_hi - y_lo) * 0.05
+        for item, epoch in self._earnings_items:
+            item.setPos(epoch, marker_y)
+
+    def set_swing_levels(
+        self,
+        high_level,
+        low_level,
+        reference_close: Optional[float],
+    ) -> None:
+        """Draws horizontal lines for the latest confirmed swing high/low.
+
+        Line color reflects the level's position relative to ``reference_close``
+        (green above, red below, neutral within tolerance — provided by the
+        level's own ``color``); the line style is solid when the level has not
+        been crossed since confirmation and dashed when it has. Levels use real
+        price coordinates, so they render identically in Line, Candle and
+        Baseline modes.
+        """
+        self._swing_level_high = high_level
+        self._swing_level_low = low_level
+        self._swing_reference_close = reference_close
+
+        for level, line, text_item in (
+            (high_level, self._swing_high_line, self._swing_high_text),
+            (low_level, self._swing_low_line, self._swing_low_text),
+        ):
+            if level is None:
+                line.setVisible(False)
+                text_item.setVisible(False)
+                continue
+            pen = QPen(QColor(level.color))
+            pen.setWidthF(1.2)
+            pen.setStyle(Qt.DashLine if level.crossed else Qt.SolidLine)
+            pen.setCosmetic(True)
+            line.setPen(pen)
+            line.setPos(level.price)
+            line.setToolTip(level.annotation)
+            line.setVisible(True)
+            text_item.setText(level.annotation)
+            text_item.setVisible(True)
+
+        self._position_level_texts()
+
+    def clear_swing_levels(self) -> None:
+        """Hides the swing level lines and annotations."""
+        self._swing_level_high = None
+        self._swing_level_low = None
+        self._swing_reference_close = None
+        self._swing_high_line.setVisible(False)
+        self._swing_low_line.setVisible(False)
+        self._swing_high_text.setVisible(False)
+        self._swing_low_text.setVisible(False)
+
+    def _position_level_texts(self, *args) -> None:
+        x_lo, x_hi = self.plot_item.vb.viewRange()[0]
+        if x_hi <= x_lo:
+            return
+        right_x = x_hi - (x_hi - x_lo) * 0.015
+        if self._swing_level_high is not None and self._swing_high_line.isVisible():
+            self._swing_high_text.setPos(right_x, self._swing_level_high.price)
+        if self._swing_level_low is not None and self._swing_low_line.isVisible():
+            self._swing_low_text.setPos(right_x, self._swing_level_low.price)
 
     def set_swing_overlay(
         self,
@@ -905,13 +1212,27 @@ class StockChartWidget(QWidget):
                 o_idx = len(self._overlay_x) - 1
             elif o_idx > 0 and abs(self._overlay_x[o_idx - 1] - x_val) < abs(self._overlay_x[o_idx] - x_val):
                 o_idx = o_idx - 1
-            detail_parts.append(f"Filtered: {sym}{self._overlay_y[o_idx]:,.2f}")
+            detail_parts.append(f"{self._overlay_label}: {sym}{self._overlay_y[o_idx]:,.2f}")
+
+        # ATR volatility bands contribute their upper/lower values
+        if self._atr_label and self._atr_upper_curve.isVisible() and idx < len(self._atr_upper):
+            atr_upper = self._atr_upper[idx]
+            atr_lower = self._atr_lower[idx] if idx < len(self._atr_lower) else None
+            if atr_upper is not None and atr_lower is not None:
+                detail_parts.append(
+                    f"{self._atr_label}+: {sym}{atr_upper:,.2f} / {sym}{atr_lower:,.2f}"
+                )
 
         # Update crosshair position
         self.v_line.setPos(px)
         self.h_line.setPos(py)
         self.v_line.setVisible(True)
         self.h_line.setVisible(True)
+
+        # Earnings markers take over the tooltip when hovered near them
+        if self._hover_earnings_marker(mouse_point.x(), mouse_point.y()):
+            self.hover_changed.emit(dt_str, py)
+            return
 
         # Update tooltip text and position
         details_str = f" | {' | '.join(detail_parts)}" if detail_parts else ""
@@ -921,3 +1242,49 @@ class StockChartWidget(QWidget):
 
         # Emit hover signal so header card can show exact hovered date/price
         self.hover_changed.emit(dt_str, py)
+
+    def _hover_earnings_marker(self, x_val: float, y_val: float) -> bool:
+        """Shows the earnings tooltip when the cursor is near a marker.
+
+        Proximity is measured in view pixels (~10px horizontally, ~10% of the
+        pane height vertically around the marker row). Returns True when an
+        earnings tooltip is displayed instead of the price tooltip.
+        """
+        if not self._earnings_items:
+            self._earnings_tooltip.setVisible(False)
+            return False
+
+        vb = self.plot_item.vb
+        x_lo, x_hi = vb.viewRange()[0]
+        y_lo, y_hi = vb.viewRange()[1]
+        if x_hi <= x_lo or y_hi <= y_lo:
+            self._earnings_tooltip.setVisible(False)
+            return False
+
+        view_width_px = max(vb.width(), 1.0)
+        x_tolerance = (x_hi - x_lo) * (10.0 / view_width_px)
+        marker_y = y_lo + (y_hi - y_lo) * 0.05
+        y_tolerance = (y_hi - y_lo) * 0.10
+
+        if abs(y_val - marker_y) > y_tolerance:
+            self._earnings_tooltip.setVisible(False)
+            return False
+
+        for item, epoch in self._earnings_items:
+            if abs(x_val - epoch) > x_tolerance:
+                continue
+            event = next(
+                (e for e in self._earnings_events if e.epoch == epoch), None
+            )
+            if event is None:
+                continue
+            self._earnings_tooltip.setText(
+                " " + format_earnings_tooltip(event, self._earnings_company) + " "
+            )
+            self._earnings_tooltip.setPos(epoch, marker_y)
+            self._earnings_tooltip.setVisible(True)
+            self.tooltip_text.setVisible(False)
+            return True
+
+        self._earnings_tooltip.setVisible(False)
+        return False

@@ -13,6 +13,7 @@ from app.services.yahoo_service import YahooService
 from app.services.market_data_service import MarketDataService
 from app.services.ticker_service import TickerService
 from app.services.sync_service import SyncService
+from app.services.earnings_service import EarningsService
 from app.ui.styles import DARK_THEME_QSS
 from app.ui.main_window import MainWindow
 
@@ -60,12 +61,14 @@ def main() -> None:
         market_data_service = MarketDataService(repo)
         ticker_service = TickerService(config_manager)
         sync_service = SyncService(yahoo_service, repo)
+        earnings_service = EarningsService(yahoo_service, repo)
 
         # Launch Main Window
         window = MainWindow(
             ticker_service=ticker_service,
             market_data_service=market_data_service,
             sync_service=sync_service,
+            earnings_service=earnings_service,
         )
         window.show()
 

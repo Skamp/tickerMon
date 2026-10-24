@@ -67,8 +67,11 @@ def count_trend_buckets(trends: Dict[str, TrendBucket]) -> Dict[TrendBucket, int
 
 
 class MarketDataService:
+    WARMUP_CACHE_MAX_ENTRIES = 32
+
     def __init__(self, repo: MarketDataRepository):
         self.repo = repo
+        self._warmup_cache: Dict[Tuple[str, TimeRange, int], Tuple[List[float], List[float], List[float], List[float]]] = {}
 
     def get_ticker_summary(self, config: TickerConfig) -> TickerSummary:
         """
@@ -360,3 +363,45 @@ class MarketDataService:
             closes.append(close_value)
 
         return volumes, opens, closes
+
+    def get_warmup_ohlcv(
+        self,
+        symbol: str,
+        time_range: TimeRange,
+        warmup_bars: int = 260,
+    ) -> Tuple[List[float], List[float], List[float], List[float]]:
+        """Returns (opens, highs, lows, closes) with extra history before the range.
+
+        The extra ``warmup_bars`` of history (approximated by two calendar days
+        per bar) lets EMA/ATR indicators seed well before the visible chart
+        range so their values at the left edge are accurate. Values are scaled
+        exactly like ``get_chart_ohlcv`` so they match the chart price series.
+        Results are cached in memory per (symbol, range, warmup); callers slice
+        the tail to align with ``get_chart_data`` output.
+        """
+        cache_key = (symbol.upper().strip(), time_range, int(warmup_bars))
+        cached = self._warmup_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        visible_start = time_range.get_start_date()
+        warmup_start = visible_start - timedelta(days=max(int(warmup_bars), 0) * 2)
+        points = self.repo.get_prices(symbol, start_date=warmup_start.strftime("%Y-%m-%d 00:00:00"))
+
+        opens: List[float] = []
+        highs: List[float] = []
+        lows: List[float] = []
+        closes: List[float] = []
+
+        for p, _, val in self._iter_priced_points(points):
+            ratio = (p.adj_close / p.close) if (p.adj_close and p.close and p.close > 0) else 1.0
+            opens.append((p.open or 0.0) * ratio)
+            highs.append((p.high or 0.0) * ratio)
+            lows.append((p.low or 0.0) * ratio)
+            closes.append(float(val) if val is not None else 0.0)
+
+        result = (opens, highs, lows, closes)
+        if len(self._warmup_cache) >= self.WARMUP_CACHE_MAX_ENTRIES:
+            self._warmup_cache.clear()
+        self._warmup_cache[cache_key] = result
+        return result

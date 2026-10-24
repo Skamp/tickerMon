@@ -68,6 +68,25 @@ class YahooService:
             logger.error(f"Error fetching Yahoo Finance data for {clean_symbol}: {e}")
             return pd.DataFrame(), info
 
+    def fetch_earnings_dates(self, symbol: str, limit: int = 40) -> pd.DataFrame:
+        """
+        Retrieves the earnings dates table for a ticker from Yahoo Finance.
+        The index holds (timezone-aware or naive) earnings timestamps; columns
+        typically include 'EPS Estimate', 'Reported EPS' and 'Surprise(%)',
+        sometimes 'Quarter' and timing. Returns an empty DataFrame on failure
+        without raising exceptions.
+        """
+        clean_symbol = symbol.upper().strip()
+        try:
+            ticker = yf.Ticker(clean_symbol)
+            df = ticker.get_earnings_dates(limit=limit)
+            if df is None:
+                return pd.DataFrame()
+            return df
+        except Exception as e:
+            logger.warning(f"Could not retrieve earnings dates for {clean_symbol}: {e}")
+            return pd.DataFrame()
+
     def batch_fetch_tickers(
         self,
         symbols: List[str],

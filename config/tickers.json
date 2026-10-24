@@ -1,6 +1,6 @@
 {
-    "selected_ticker": "UNH",
-    "selected_range": "1Y",
+    "selected_ticker": "^KS11",
+    "selected_range": "6M",
     "tickers": [
         {
             "symbol": "AAPL",
@@ -247,6 +247,54 @@
             "name": "Kioxia Holdings Corporation",
             "enabled": true,
             "added_at": "2026-10-14 14:29:09"
+        },
+        {
+            "symbol": "^VIX",
+            "name": "CBOE Volatility Index",
+            "enabled": true,
+            "added_at": "2026-10-20 22:45:52"
+        },
+        {
+            "symbol": "6857.T",
+            "name": "Advantest Corporation",
+            "enabled": true,
+            "added_at": "2026-10-20 23:04:07"
+        },
+        {
+            "symbol": "ZS",
+            "name": "Zscaler, Inc.",
+            "enabled": true,
+            "added_at": "2026-10-20 23:05:06"
+        },
+        {
+            "symbol": "CLS",
+            "name": "Celestica Inc.",
+            "enabled": true,
+            "added_at": "2026-10-20 23:05:33"
+        },
+        {
+            "symbol": "CRWV",
+            "name": "CoreWeave, Inc.",
+            "enabled": true,
+            "added_at": "2026-10-20 23:07:30"
+        },
+        {
+            "symbol": "^KS11",
+            "name": "KOSPI Composite Index",
+            "enabled": true,
+            "added_at": "2026-10-21 11:20:13"
+        },
+        {
+            "symbol": "ERF.PA",
+            "name": "Eurofins Scientific SE",
+            "enabled": true,
+            "added_at": "2026-10-21 12:30:46"
+        },
+        {
+            "symbol": "FDS",
+            "name": "FactSet Research Systems Inc.",
+            "enabled": true,
+            "added_at": "2026-10-21 15:23:59"
         }
     ],
     "enabled_filters": [
@@ -254,6 +302,9 @@
         "Exponential Moving Average (EMA)",
         "Exponential MA (EMA 50)",
         "Exponential MA (EMA 200)",
+        "EMA 20",
+        "ATR14 x 2",
+        "ATR14 x 4",
         "Savitzky-Golay Filter",
         "Ramer-Douglas-Peucker (RDP)",
         "Ramer-Douglas-Peucker (Loose)",
@@ -392,5 +443,6 @@
         "value_max": 1,
         "unit": "weeks"
     },
-    "chart_type": "Baseline"
+    "chart_type": "Baseline",
+    "show_structure_labels": false
 }

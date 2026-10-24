@@ -313,6 +313,30 @@ class TestConfig(unittest.TestCase):
         service = TickerService(self.config_manager)
         self.assertEqual(service.get_chart_type(), ChartType.LINE)
 
+    def test_structure_labels_default_enabled(self):
+        self.assertIsNone(self.config_manager.load_show_structure_labels())
+
+        service = TickerService(self.config_manager)
+        self.assertTrue(service.get_show_structure_labels())
+
+    def test_structure_labels_roundtrip(self):
+        service = TickerService(self.config_manager)
+        self.assertTrue(service.set_show_structure_labels(False))
+
+        reloaded = TickerService(self.config_manager)
+        self.assertFalse(reloaded.get_show_structure_labels())
+
+    def test_structure_labels_survive_ticker_save(self):
+        service = TickerService(self.config_manager)
+        service.set_show_structure_labels(False)
+
+        ok, _ = service.add_ticker("IBM", "International Business Machines")
+        self.assertTrue(ok)
+
+        self.assertFalse(self.config_manager.load_show_structure_labels())
+        reloaded = TickerService(self.config_manager)
+        self.assertFalse(reloaded.get_show_structure_labels())
+
 
 if __name__ == "__main__":
     unittest.main()

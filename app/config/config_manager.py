@@ -195,6 +195,34 @@ class ConfigManager:
             logger.error(f"Failed to save chart type setting: {e}")
             return False
 
+    def load_show_structure_labels(self) -> Optional[bool]:
+        """Returns the market-structure label visibility, or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            value = data.get("show_structure_labels")
+            return value if isinstance(value, bool) else None
+        except Exception as e:
+            logger.error(f"Error reading structure label setting: {e}")
+            return None
+
+    def save_show_structure_labels(self, show: bool) -> bool:
+        """Saves the market-structure label visibility flag."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["show_structure_labels"] = bool(show)
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved structure label setting to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save structure label setting: {e}")
+            return False
+
     def _read_raw_config(self) -> Dict[str, Any]:
         if not self.config_path.exists():
             return {}

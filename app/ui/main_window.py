@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSpinBox,
     QSizePolicy,
+    QCheckBox,
 )
 
 from app.models.time_range import TimeRange
@@ -31,10 +32,20 @@ from app.services.market_data_service import (
 )
 from app.services.sync_service import SyncService
 from app.services.noise_reduction import NoiseReductionAlgorithm, reduce_noise
+from app.services.technical_indicators import (
+    ATR_PERIOD,
+    compute_atr,
+    compute_atr_bands,
+    compute_ema,
+)
+from app.services.market_structure import classify_structure, compute_label_positions
+from app.services.swing_levels import compute_swing_levels
+from app.services.earnings_service import EarningsService
 from app.services.swing_detection import (
     SwingAlgorithm,
     SwingRangeMode,
     SWING_ALGORITHM_DESCRIPTIONS,
+    SWING_THRESHOLD_PCT,
     describe_swing_range,
     format_swing_params,
 )
@@ -57,8 +68,11 @@ from app.ui.swing_settings_dialog import SwingSettingsDialog
 from app.ui.trend_filter_bar import TrendFilterBar
 from app.ui.update_dialog import UpdateProgressDialog
 from app.workers.update_worker import UpdateWorker
+from app.workers.earnings_worker import EarningsWorker
 
 logger = logging.getLogger(__name__)
+
+INDICATOR_WARMUP_BARS = 260
 
 
 class MainWindow(QMainWindow):
@@ -67,11 +81,13 @@ class MainWindow(QMainWindow):
         ticker_service: TickerService,
         market_data_service: MarketDataService,
         sync_service: SyncService,
+        earnings_service: EarningsService,
     ):
         super().__init__()
         self.ticker_service = ticker_service
         self.market_data_service = market_data_service
         self.sync_service = sync_service
+        self.earnings_service = earnings_service
 
         self.setWindowTitle("tickerMon - Stock Market Terminal")
         self.resize(1480, 780)
@@ -84,6 +100,8 @@ class MainWindow(QMainWindow):
         self._current_summary: Optional[TickerSummary] = None
         self._period_start_price: Optional[float] = None
         self._update_worker: Optional[UpdateWorker] = None
+        self._earnings_worker: Optional[EarningsWorker] = None
+        self._earnings_events: List = []
         self._chart_timestamps: List[float] = []
         self._chart_prices: List[float] = []
 
@@ -205,6 +223,14 @@ class MainWindow(QMainWindow):
         self.btn_swing_settings.setToolTip("Enable swing algorithms and configure their parameters")
         self.btn_swing_settings.clicked.connect(self._on_open_swing_settings)
         swing_row.addWidget(self.btn_swing_settings)
+
+        self.chk_structure_labels = QCheckBox("Structure labels", toolbar_frame)
+        self.chk_structure_labels.setToolTip(
+            "Show market structure labels (HH / HL / LH / LL / M)\non confirmed swing pivots."
+        )
+        self.chk_structure_labels.setChecked(True)
+        self.chk_structure_labels.toggled.connect(self._on_structure_labels_toggled)
+        swing_row.addWidget(self.chk_structure_labels)
 
         filter_stack.addLayout(swing_row)
 
@@ -586,6 +612,11 @@ class MainWindow(QMainWindow):
             self.combo_chart_type.setCurrentIndex(chart_index)
             self.combo_chart_type.blockSignals(False)
 
+        self.chk_structure_labels.blockSignals(True)
+        self.chk_structure_labels.setChecked(self.ticker_service.get_show_structure_labels())
+        self.chart_widget.set_structure_labels_visible(self.chk_structure_labels.isChecked())
+        self.chk_structure_labels.blockSignals(False)
+
         self._refresh_ticker_list(select_symbol=target_ticker)
 
     def _refresh_ticker_list(self, select_symbol: Optional[str] = None) -> None:
@@ -648,7 +679,12 @@ class MainWindow(QMainWindow):
             self._period_start_price = None
             self.lbl_high_low.setText("High: -- | Low: --")
             self.chart_widget.clear_overlay()
+            self.chart_widget.clear_atr_overlay()
             self.chart_widget.clear_swing_overlay()
+            self.chart_widget.clear_swing_levels()
+            self.chart_widget.clear_structure_labels()
+            self.chart_widget.clear_earnings_events()
+            self._earnings_events = []
             self.chart_widget.show_empty_state(
                 True,
                 f"No local market data available for '{symbol}'.\nPress 'Update all tickers' (Ctrl+U) to download prices from Yahoo Finance."
@@ -682,10 +718,10 @@ class MainWindow(QMainWindow):
                 self.lbl_change.setStyle(self.lbl_change.style())
 
             ohlc = None
+            opens, highs, lows = self.market_data_service.get_chart_ohlcv(
+                symbol, self._active_range
+            )
             if self._active_chart_type == ChartType.CANDLE:
-                opens, highs, lows = self.market_data_service.get_chart_ohlcv(
-                    symbol, self._active_range
-                )
                 ohlc = (opens, highs, lows)
             self.chart_widget.set_data(
                 timestamps,
@@ -697,43 +733,129 @@ class MainWindow(QMainWindow):
             )
 
             # Volume bars from the same local OHLCV rows (no extra API call)
-            volumes, opens, closes = self.market_data_service.get_chart_volume(
+            volumes, opens_v, closes_v = self.market_data_service.get_chart_volume(
                 symbol, self._active_range
             )
-            self.chart_widget.set_volume_data(timestamps, volumes, opens, closes, date_labels)
+            self.chart_widget.set_volume_data(timestamps, volumes, opens_v, closes_v, date_labels)
 
-            # Apply active noise reduction algorithm overlay
+            # Apply active noise-reduction / technical-indicator overlay
             self._apply_active_noise_reduction(timestamps, prices)
 
-            # Draw detected swing pivots and parameter details
+            # Draw detected swing pivots, structure labels and swing levels
             self._update_swing_overlay()
+
+            # Earnings markers from the local cache (network refresh is async)
+            self._load_earnings_for_symbol(symbol, summary.company_name)
 
             self.status_bar.showMessage(f"Loaded {len(prices)} historical points for {symbol} ({self._active_range.display_name}).")
 
     def _apply_active_noise_reduction(self, timestamps: List[float], prices: List[float]) -> None:
-        """Applies selected noise reduction algorithm and overlays secondary curve."""
-        if self._active_noise_algo == NoiseReductionAlgorithm.NONE or not timestamps:
+        """Applies the active filter: noise reduction curve, EMA 20 or ATR bands."""
+        algorithm = self._active_noise_algo
+        if algorithm == NoiseReductionAlgorithm.NONE or not timestamps:
             self.chart_widget.clear_overlay()
+            self.chart_widget.clear_atr_overlay()
             return
 
-        red_x, red_y = reduce_noise(self._active_noise_algo, timestamps, prices)
+        if algorithm in (NoiseReductionAlgorithm.ATR2, NoiseReductionAlgorithm.ATR4):
+            self.chart_widget.clear_overlay()
+            self._apply_atr_overlay(timestamps, prices, algorithm)
+            return
+
+        self.chart_widget.clear_atr_overlay()
+
+        if algorithm == NoiseReductionAlgorithm.EMA20:
+            self._apply_ema20_overlay(timestamps, prices)
+            return
+
+        red_x, red_y = reduce_noise(algorithm, timestamps, prices)
         self.chart_widget.set_overlay_data(red_x, red_y)
+
+    def _apply_ema20_overlay(self, timestamps: List[float], prices: List[float]) -> None:
+        """EMA 20 seeded on warm-up history so left-edge values are accurate."""
+        ema = self._compute_warmup_indicator(timestamps, prices, lambda closes: compute_ema(closes, 20))
+        if ema is None:
+            self.chart_widget.clear_overlay()
+            return
+        self.chart_widget.set_overlay_data(timestamps, ema, color="#26c6da", label="EMA20")
+
+    def _apply_atr_overlay(
+        self,
+        timestamps: List[float],
+        prices: List[float],
+        algorithm: NoiseReductionAlgorithm,
+    ) -> None:
+        """Close ± N×ATR14 volatility bands from a shared warm-up ATR series."""
+        multiplier = 2.0 if algorithm == NoiseReductionAlgorithm.ATR2 else 4.0
+        symbol = self.ticker_list.get_selected_symbol() or ""
+        n = len(prices)
+
+        def build(closes_tail, highs_tail, lows_tail):
+            atr = compute_atr(highs_tail, lows_tail, closes_tail, period=ATR_PERIOD)
+            upper, lower = compute_atr_bands(closes_tail, atr, multiplier)
+            return upper, lower
+
+        result = self._compute_warmup_ohlc_indicator(
+            symbol, n, build
+        )
+        if result is None:
+            self.chart_widget.clear_atr_overlay()
+            return
+        upper, lower = result
+        if all(v is None for v in upper):
+            self.chart_widget.clear_atr_overlay()
+            return
+
+        label = "ATR14 x 2" if algorithm == NoiseReductionAlgorithm.ATR2 else "ATR14 x 4"
+        color = "#29b6f6" if algorithm == NoiseReductionAlgorithm.ATR2 else "#ab47bc"
+        self.chart_widget.set_atr_overlay(timestamps, upper, lower, label, color)
+
+    def _compute_warmup_indicator(self, timestamps, prices, compute):
+        """Runs ``compute`` on warm-up closes, returning the visible-range tail."""
+        symbol = self.ticker_list.get_selected_symbol() or ""
+        n = len(prices)
+        warm = self.market_data_service.get_warmup_ohlcv(
+            symbol, self._active_range, warmup_bars=INDICATOR_WARMUP_BARS
+        )
+        closes = warm[3]
+        values = compute(closes)
+        if len(values) >= n:
+            tail = values[-n:]
+        else:
+            tail = compute(prices)
+        if len(tail) != n:
+            return None
+        return tail
+
+    def _compute_warmup_ohlc_indicator(self, symbol, n, build):
+        """Runs ``build(closes, highs, lows)`` on warm-up OHLC, sliced to n bars."""
+        warm = self.market_data_service.get_warmup_ohlcv(
+            symbol, self._active_range, warmup_bars=INDICATOR_WARMUP_BARS
+        )
+        opens, highs, lows, closes = warm
+        if len(closes) < n:
+            return None
+        return build(closes[-n:], highs[-n:], lows[-n:])
 
     def _update_swing_overlay(self) -> None:
         """Draws the pivots detected by the active swing algorithm on the chart."""
         if not self._chart_timestamps or not self._chart_prices:
             self.chart_widget.clear_swing_overlay()
+            self.chart_widget.clear_swing_levels()
+            self.chart_widget.clear_structure_labels()
             return
 
         algorithm = self._active_swing_algo
         params = self.ticker_service.get_swing_params(algorithm)
         range_settings = self.ticker_service.get_swing_range_settings()
         symbol = self.ticker_list.get_selected_symbol() or ""
+        timestamps = self._chart_timestamps
+        prices = self._chart_prices
         pivots, legs = self.market_data_service.detect_swing_overlay(
             symbol,
             self._active_range,
-            self._chart_prices,
-            self._chart_timestamps,
+            prices,
+            timestamps,
             algorithm,
             params,
             range_settings,
@@ -743,8 +865,66 @@ class MainWindow(QMainWindow):
             f"{format_swing_params(algorithm, params)}\n"
             f"Swing range: {describe_swing_range(range_settings)}"
         )
-        self.chart_widget.set_swing_overlay(
-            self._chart_timestamps, self._chart_prices, pivots, title, details, legs
+        self.chart_widget.set_swing_overlay(timestamps, prices, pivots, title, details, legs)
+
+        # Market structure labels on the same confirmed pivots
+        if self.ticker_service.get_show_structure_labels():
+            macro_threshold = params.get("min_swing_pct", SWING_THRESHOLD_PCT)
+            structure_points = classify_structure(
+                pivots, prices, macro_threshold_pct=macro_threshold
+            )
+            placements = compute_label_positions(structure_points, timestamps, prices)
+            self.chart_widget.set_structure_labels(placements)
+        else:
+            self.chart_widget.clear_structure_labels()
+
+        # Latest confirmed swing high/low levels with distances and crossing status
+        opens, highs, lows = self.market_data_service.get_chart_ohlcv(symbol, self._active_range)
+        reference_close = prices[-1]
+        currency = self._current_summary.currency if self._current_summary else None
+        high_level, low_level = compute_swing_levels(
+            pivots,
+            prices,
+            reference_close,
+            highs=highs,
+            lows=lows,
+            closes=prices,
+            currency_code=currency,
+        )
+        self.chart_widget.set_swing_levels(high_level, low_level, reference_close)
+
+    def _load_earnings_for_symbol(self, symbol: str, company_name: Optional[str]) -> None:
+        """Shows cached earnings markers and refreshes them in the background when stale."""
+        events = self.earnings_service.get_events(symbol)
+        self._earnings_events = events
+        self.chart_widget.set_earnings_events(events, symbol, company_name)
+        if self.earnings_service.is_stale(symbol):
+            self._start_earnings_refresh(symbol)
+
+    def _start_earnings_refresh(self, symbol: str) -> None:
+        if self._earnings_worker is not None and self._earnings_worker.isRunning():
+            return
+        self._earnings_worker = EarningsWorker(self.earnings_service, symbol, self)
+        self._earnings_worker.finished_events.connect(self._on_earnings_refreshed)
+        self._earnings_worker.start()
+
+    def _on_earnings_refreshed(self, symbol: str, events) -> None:
+        if symbol != (self.ticker_list.get_selected_symbol() or ""):
+            return
+        self._earnings_events = list(events) if events else []
+        company = self._current_summary.company_name if self._current_summary else None
+        self.chart_widget.set_earnings_events(self._earnings_events, symbol, company)
+        if self._earnings_events:
+            self.status_bar.showMessage(
+                f"Earnings events updated for {symbol} ({len(self._earnings_events)} events)."
+            )
+
+    def _on_structure_labels_toggled(self, checked: bool) -> None:
+        """Toggles label visibility without recalculating the swing structure."""
+        self.ticker_service.set_show_structure_labels(checked)
+        self.chart_widget.set_structure_labels_visible(checked)
+        self.status_bar.showMessage(
+            f"Market structure labels {'shown' if checked else 'hidden'}."
         )
 
     def _load_swing_range_settings(self) -> None:
@@ -1033,3 +1213,10 @@ class MainWindow(QMainWindow):
         self._refresh_ticker_list(select_symbol=curr_sym)
         if curr_sym:
             self._on_ticker_selected(curr_sym)
+
+    def closeEvent(self, event) -> None:
+        """Joins the background earnings refresh so the thread dies with the window."""
+        if self._earnings_worker is not None and self._earnings_worker.isRunning():
+            self._earnings_worker.finished_events.disconnect(self._on_earnings_refreshed)
+            self._earnings_worker.wait(3000)
+        super().closeEvent(event)

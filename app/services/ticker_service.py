@@ -105,6 +105,15 @@ class TickerService:
     def set_chart_type(self, chart_type: ChartType) -> bool:
         return self.config_manager.save_chart_type(chart_type.value)
 
+    def get_show_structure_labels(self) -> bool:
+        stored = self.config_manager.load_show_structure_labels()
+        if not isinstance(stored, bool):
+            return True
+        return stored
+
+    def set_show_structure_labels(self, show: bool) -> bool:
+        return self.config_manager.save_show_structure_labels(bool(show))
+
     def get_enabled_filters(self) -> List[str]:
         stored = self.config_manager.load_enabled_filters()
         if stored is None or not isinstance(stored, list):

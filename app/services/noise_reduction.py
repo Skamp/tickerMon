@@ -12,6 +12,9 @@ class NoiseReductionAlgorithm(Enum):
     EMA = "Exponential Moving Average (EMA)"
     EMA50 = "Exponential MA (EMA 50)"
     EMA200 = "Exponential MA (EMA 200)"
+    EMA20 = "EMA 20"
+    ATR2 = "ATR14 x 2"
+    ATR4 = "ATR14 x 4"
     SAVITZKY_GOLAY = "Savitzky-Golay Filter"
     DOUGLAS_PEUCKER = "Ramer-Douglas-Peucker (RDP)"
     RPD1 = "Ramer-Douglas-Peucker (Loose)"
@@ -625,6 +628,12 @@ def reduce_noise(
             return apply_ema_reduction(timestamps, prices, span=50)
         elif algorithm == NoiseReductionAlgorithm.EMA200:
             return apply_ema_reduction(timestamps, prices, span=200)
+        elif algorithm == NoiseReductionAlgorithm.EMA20:
+            return apply_ema_reduction(timestamps, prices, span=20)
+        elif algorithm in (NoiseReductionAlgorithm.ATR2, NoiseReductionAlgorithm.ATR4):
+            # ATR bands require OHLC data and are rendered by the technical
+            # overlay path in the UI; the price series passes through unchanged.
+            return timestamps, prices
         elif algorithm == NoiseReductionAlgorithm.SAVITZKY_GOLAY:
             return apply_savitzky_golay_reduction(timestamps, prices)
         elif algorithm == NoiseReductionAlgorithm.DOUGLAS_PEUCKER:

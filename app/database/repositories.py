@@ -6,6 +6,7 @@ from datetime import datetime
 
 from app.database.database import Database
 from app.models.price_data import PricePoint, PriceSeries
+from app.models.earnings import EarningsEvent
 
 logger = logging.getLogger(__name__)
 
@@ -270,3 +271,91 @@ class MarketDataRepository:
         except Exception as e:
             logger.error(f"Error fetching all metadata: {e}")
         return meta_dict
+
+    def replace_earnings(self, symbol: str, events: List[EarningsEvent]) -> None:
+        """Replaces all cached earnings events for a symbol."""
+        clean_symbol = symbol.upper().strip()
+        records = [
+            (
+                clean_symbol,
+                event.event_date,
+                event.eps_estimate,
+                event.reported_eps,
+                event.surprise_pct,
+                1 if event.is_estimated else 0,
+                event.quarter,
+                event.timing,
+            )
+            for event in events
+        ]
+        sql = """
+        INSERT INTO earnings (symbol, event_date, eps_estimate, reported_eps, surprise_pct, is_estimated, quarter, timing)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM earnings WHERE symbol = ?;", [clean_symbol])
+                if records:
+                    cursor.executemany(sql, records)
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to replace earnings for {clean_symbol}: {e}")
+            raise
+
+    def get_earnings(self, symbol: str) -> List[EarningsEvent]:
+        """Returns cached earnings events for a symbol, oldest first."""
+        clean_symbol = symbol.upper().strip()
+        sql = (
+            "SELECT symbol, event_date, eps_estimate, reported_eps, surprise_pct, "
+            "is_estimated, quarter, timing FROM earnings WHERE symbol = ? "
+            "ORDER BY event_date ASC;"
+        )
+        results: List[EarningsEvent] = []
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, [clean_symbol])
+                for row in cursor.fetchall():
+                    results.append(EarningsEvent(
+                        symbol=row["symbol"],
+                        event_date=row["event_date"],
+                        eps_estimate=row["eps_estimate"],
+                        reported_eps=row["reported_eps"],
+                        surprise_pct=row["surprise_pct"],
+                        is_estimated=bool(row["is_estimated"]),
+                        quarter=row["quarter"],
+                        timing=row["timing"],
+                    ))
+        except Exception as e:
+            logger.error(f"Error querying earnings for {clean_symbol}: {e}")
+        return results
+
+    def get_earnings_fetched_at(self, symbol: str) -> Optional[str]:
+        """Returns the ISO timestamp of the last successful earnings fetch."""
+        clean_symbol = symbol.upper().strip()
+        sql = "SELECT fetched_at FROM earnings_meta WHERE symbol = ?;"
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, [clean_symbol])
+                row = cursor.fetchone()
+                return row["fetched_at"] if row else None
+        except Exception as e:
+            logger.error(f"Error reading earnings fetch time for {clean_symbol}: {e}")
+            return None
+
+    def set_earnings_fetched_at(self, symbol: str, fetched_at: str) -> None:
+        """Upserts the last successful earnings fetch timestamp."""
+        clean_symbol = symbol.upper().strip()
+        sql = """
+        INSERT INTO earnings_meta (symbol, fetched_at) VALUES (?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET fetched_at = excluded.fetched_at;
+        """
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, [clean_symbol, fetched_at])
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving earnings fetch time for {clean_symbol}: {e}")
