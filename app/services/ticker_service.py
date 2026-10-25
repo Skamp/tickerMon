@@ -4,6 +4,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Tuple, Optional
 from app.config.config_manager import ConfigManager
 from app.models.chart_type import ChartType
+from app.models.forecast import (
+    ForecastHorizon,
+    normalize_forecast_annotation_anchor,
+    normalize_forecast_filter,
+)
 from app.models.ticker import TickerConfig
 from app.services.noise_reduction import NoiseReductionAlgorithm
 from app.services.swing_detection import (
@@ -113,6 +118,35 @@ class TickerService:
 
     def set_show_structure_labels(self, show: bool) -> bool:
         return self.config_manager.save_show_structure_labels(bool(show))
+
+    def get_forecast_horizon(self) -> ForecastHorizon:
+        stored = self.config_manager.load_forecast_horizon()
+        if not isinstance(stored, str):
+            return ForecastHorizon.OFF
+        return ForecastHorizon.from_str(stored)
+
+    def set_forecast_horizon(self, horizon: ForecastHorizon) -> bool:
+        return self.config_manager.save_forecast_horizon(horizon.value)
+
+    def get_forecast_annotation_anchor(self) -> str:
+        return normalize_forecast_annotation_anchor(
+            self.config_manager.load_forecast_annotation_anchor()
+        )
+
+    def set_forecast_annotation_anchor(self, anchor: str) -> bool:
+        return self.config_manager.save_forecast_annotation_anchor(
+            normalize_forecast_annotation_anchor(anchor)
+        )
+
+    def get_forecast_filter(self) -> str:
+        return normalize_forecast_filter(
+            self.config_manager.load_forecast_filter()
+        )
+
+    def set_forecast_filter(self, filter_key: str) -> bool:
+        return self.config_manager.save_forecast_filter(
+            normalize_forecast_filter(filter_key)
+        )
 
     def get_enabled_filters(self) -> List[str]:
         stored = self.config_manager.load_enabled_filters()

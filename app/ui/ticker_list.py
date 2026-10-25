@@ -168,6 +168,8 @@ class TickerListWidget(QListWidget):
         self._swing_symbols: Set[str] = set()
         self._active_buckets: Set[TrendBucket] = set()
         self._swing_active: bool = False
+        self._forecast_filter_active: bool = False
+        self._forecast_symbols: Set[str] = set()
         self._sort_mode: str = SORT_BY_TICKER
 
         self.currentItemChanged.connect(self._on_item_changed)
@@ -200,6 +202,21 @@ class TickerListWidget(QListWidget):
         self._swing_active = include_swing
         self._repopulate(None)
 
+    def set_forecast_filter(
+        self, active: bool, symbols: Optional[Set[str]] = None
+    ) -> None:
+        """ANDs a forecast filter: only tickers in ``symbols`` stay visible.
+
+        ``active=False`` disables the criterion entirely (an active filter
+        with an empty symbol set hides every ticker).
+        """
+        new_symbols = set(symbols) if symbols else set()
+        if active == self._forecast_filter_active and new_symbols == self._forecast_symbols:
+            return
+        self._forecast_filter_active = active
+        self._forecast_symbols = new_symbols
+        self._repopulate(None)
+
     def _repopulate(self, select_symbol: Optional[str]) -> None:
         prev_symbol = self.get_selected_symbol()
         target_sym = select_symbol.upper().strip() if select_symbol else prev_symbol
@@ -217,6 +234,8 @@ class TickerListWidget(QListWidget):
                 in_swing = self._swing_active and summary.symbol in self._swing_symbols
                 if not (in_trend or in_swing):
                     continue
+            if self._forecast_filter_active and summary.symbol not in self._forecast_symbols:
+                continue
 
             item = QListWidgetItem()
             item.setData(Qt.UserRole, summary)

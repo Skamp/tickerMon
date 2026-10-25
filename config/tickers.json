@@ -1,5 +1,5 @@
 {
-    "selected_ticker": "^KS11",
+    "selected_ticker": "285A.T",
     "selected_range": "6M",
     "tickers": [
         {
@@ -444,5 +444,7 @@
         "unit": "weeks"
     },
     "chart_type": "Baseline",
-    "show_structure_labels": false
+    "show_structure_labels": false,
+    "forecast_horizon": "Off",
+    "forecast_filter": "off"
 }

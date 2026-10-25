@@ -5,12 +5,26 @@ from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPen, QBrush, QLinearGradient
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGraphicsRectItem
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QGraphicsRectItem,
+    QGraphicsItem,
+    QMenu,
+)
 
 import pyqtgraph as pg
 
 from app.models.chart_type import ChartType
 from app.models.earnings import EarningsEvent, format_earnings_tooltip
+from app.models.forecast import (
+    FORECAST_ANNOTATION_ANCHOR_LABELS,
+    FORECAST_ANNOTATION_DEFAULT_ANCHOR,
+    Forecast,
+    format_forecast_annotation_html,
+    normalize_forecast_annotation_anchor,
+)
 from app.utils.currency import get_currency_symbol
 from app.ui.volume_chart_widget import (
     BUY_COLOR,
@@ -41,6 +55,18 @@ EMA20_COLOR = "#26c6da"
 
 EARNINGS_CONFIRMED_COLOR = "#ffca28"
 EARNINGS_ESTIMATED_COLOR = "#78909c"
+
+FORECAST_COLOR = "#7e57c2"
+FORECAST_BULLISH_COLOR = "#00e676"
+FORECAST_BEARISH_COLOR = "#ff5252"
+FORECAST_NEUTRAL_COLOR = "#8b90a0"
+
+_FORECAST_ANCHOR_POINTS = {
+    "top_right": (1.0, 0.0),
+    "top_left": (0.0, 0.0),
+    "bottom_right": (1.0, 1.0),
+    "bottom_left": (0.0, 1.0),
+}
 
 _LEVEL_NEUTRAL_COLOR = "#8b90a0"
 
@@ -278,9 +304,46 @@ class PriceAxisItem(pg.AxisItem):
         return strings
 
 
+class ForecastAnnotationItem(pg.TextItem):
+    """Draggable forecast info box with an anchor-selection context menu.
+
+    pyqtgraph's TextItem has no drag support, so this subclass enables Qt's
+    built-in item movement and reports user drags and anchor choices back to
+    the chart through callbacks.
+    """
+
+    def __init__(self, *args, on_user_moved=None, on_anchor_chosen=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._on_user_moved = on_user_moved
+        self._on_anchor_chosen = on_anchor_chosen
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionHasChanged and self._on_user_moved is not None:
+            self._on_user_moved()
+        return super().itemChange(change, value)
+
+    def contextMenuEvent(self, ev):
+        if self._on_anchor_chosen is None:
+            ev.ignore()
+            return
+        menu = QMenu()
+        for key, label in FORECAST_ANNOTATION_ANCHOR_LABELS.items():
+            action = menu.addAction(label)
+            action.setData(key)
+        chosen = menu.exec(ev.screenPos().toPoint())
+        if chosen is not None:
+            ev.accept()
+            self._on_anchor_chosen(str(chosen.data()))
+        else:
+            ev.ignore()
+
+
 class StockChartWidget(QWidget):
     hover_changed = Signal(str, float)  # Emits (date_string, hovered_price)
     hover_left = Signal()               # Emits when mouse exits chart bounds
+    forecast_annotation_anchor_changed = Signal(str)  # Emits the chosen info-box anchor
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -424,6 +487,62 @@ class StockChartWidget(QWidget):
         self.plot_item.addItem(self._earnings_tooltip, ignoreBounds=True)
         self._earnings_tooltip.setVisible(False)
 
+        # Forecast projection layer: dashed central path, translucent estimated
+        # range fill, target marker and a top-right annotation. Renders in the
+        # future time region beyond the last historical bar.
+        self._forecast_pen = QPen(QColor(FORECAST_COLOR))
+        self._forecast_pen.setWidthF(1.6)
+        self._forecast_pen.setStyle(Qt.DashLine)
+        self._forecast_pen.setCosmetic(True)
+        self._forecast_band_pen = QPen(QColor(FORECAST_COLOR))
+        self._forecast_band_pen.setWidthF(0.8)
+        self._forecast_band_pen.setCosmetic(True)
+        self._forecast_upper_curve = self.plot_item.plot(pen=self._forecast_band_pen)
+        self._forecast_lower_curve = self.plot_item.plot(pen=self._forecast_band_pen)
+        self._forecast_fill = pg.FillBetweenItem(
+            self._forecast_upper_curve,
+            self._forecast_lower_curve,
+            brush=pg.mkBrush(QColor(0, 0, 0, 0)),
+        )
+        self.plot_item.addItem(self._forecast_fill, ignoreBounds=True)
+        self._forecast_central_curve = self.plot_item.plot(pen=self._forecast_pen)
+        self._forecast_target = pg.ScatterPlotItem(
+            size=9,
+            brush=pg.mkBrush(QColor(FORECAST_COLOR)),
+            pen=pg.mkPen(QColor("#121318"), width=1.0),
+        )
+        self.plot_item.addItem(self._forecast_target, ignoreBounds=True)
+        self._forecast_reference = pg.ScatterPlotItem(
+            size=6,
+            brush=pg.mkBrush(QColor(FORECAST_COLOR)),
+            pen=pg.mkPen(QColor("#121318"), width=1.0),
+        )
+        self.plot_item.addItem(self._forecast_reference, ignoreBounds=True)
+        self._forecast_annotation = ForecastAnnotationItem(
+            text="",
+            anchor=(1.0, 0.0),
+            color="#ffffff",
+            fill=pg.mkBrush("#1a1c24f0"),
+            on_user_moved=self._on_forecast_annotation_user_moved,
+            on_anchor_chosen=self._on_forecast_annotation_anchor_chosen,
+        )
+        self.plot_item.addItem(self._forecast_annotation, ignoreBounds=True)
+        self._forecast_annotation.setZValue(100)
+        self._forecast_upper_curve.setVisible(False)
+        self._forecast_lower_curve.setVisible(False)
+        self._forecast_fill.setVisible(False)
+        self._forecast_central_curve.setVisible(False)
+        self._forecast_target.setVisible(False)
+        self._forecast_reference.setVisible(False)
+        self._forecast_annotation.setVisible(False)
+        self._forecast: Optional[Forecast] = None
+        self._forecast_is_saved = False
+        self._forecast_bounds: Optional[Tuple[float, float]] = None
+        self._forecast_annotation_anchor = FORECAST_ANNOTATION_DEFAULT_ANCHOR
+        self._forecast_annotation_user_moved = False
+        self._forecast_annotation_setting_pos = False
+        self._forecast_overlay_visible = True
+
         # Swing Overlay: zigzag line + pivot markers (Violet stroke)
         swing_color = QColor("#e040fb")
         self.swing_pen = QPen(swing_color)
@@ -505,6 +624,7 @@ class StockChartWidget(QWidget):
         # stay pinned just above the bottom of the price pane.
         self.plot_item.vb.sigRangeChanged.connect(self._position_level_texts)
         self.plot_item.vb.sigRangeChanged.connect(self._position_earnings_markers)
+        self.plot_item.vb.sigRangeChanged.connect(self._position_forecast_annotation)
 
     def set_currency(self, currency_code: Optional[str]) -> None:
         """Sets the currency symbol used by the Y-axis, tooltip and volume panel."""
@@ -746,6 +866,9 @@ class StockChartWidget(QWidget):
             y_max = max(y_max, max(atr_upper_valid))
         if atr_lower_valid:
             y_min = min(y_min, min(atr_lower_valid))
+        if self._forecast_bounds and self._forecast_overlay_visible:
+            y_max = max(y_max, self._forecast_bounds[1])
+            y_min = min(y_min, self._forecast_bounds[0])
 
         padding = (y_max - y_min) * 0.08 if y_max > y_min else y_max * 0.05
 
@@ -1016,6 +1139,227 @@ class StockChartWidget(QWidget):
             self._swing_high_text.setPos(right_x, self._swing_level_high.price)
         if self._swing_level_low is not None and self._swing_low_line.isVisible():
             self._swing_low_text.setPos(right_x, self._swing_level_low.price)
+
+    def set_forecast_overlay(self, forecast: Forecast, is_saved: bool = False) -> None:
+        """Renders a forecast projection beyond the last historical bar.
+
+        The historical series is untouched: the forecast is a separate layer
+        with a dashed central path (an explicitly defined geometric projection
+        from the model, not invented intermediate prices), a translucent
+        estimated-range fill that widens with the square root of the horizon,
+        and target/reference markers. Works in Line, Candle and Baseline modes
+        because it uses real price coordinates.
+        """
+        self._forecast = forecast
+        self._forecast_is_saved = bool(is_saved)
+
+        xs = [float(x) for x in forecast.path_epochs]
+        central = [float(y) for y in forecast.path_central]
+        lower = [float(y) for y in forecast.path_lower]
+        upper = [float(y) for y in forecast.path_upper]
+        count = min(len(xs), len(central), len(lower), len(upper))
+        if count < 2:
+            self.clear_forecast_overlay()
+            return
+        xs = xs[:count]
+        central = central[:count]
+        lower = lower[:count]
+        upper = upper[:count]
+
+        self._forecast_central_curve.setData(xs, central)
+        self._forecast_upper_curve.setData(xs, upper)
+        self._forecast_lower_curve.setData(xs, lower)
+        fill_color = QColor(FORECAST_COLOR)
+        fill_color.setAlpha(28)
+        self._forecast_fill.setBrush(pg.mkBrush(fill_color))
+        self._forecast_target.setData([xs[-1]], [central[-1]])
+        self._forecast_reference.setData([xs[0]], [central[0]])
+        self._forecast_central_curve.setVisible(self._forecast_overlay_visible)
+        self._forecast_upper_curve.setVisible(self._forecast_overlay_visible)
+        self._forecast_lower_curve.setVisible(self._forecast_overlay_visible)
+        self._forecast_fill.setVisible(self._forecast_overlay_visible)
+        self._forecast_target.setVisible(self._forecast_overlay_visible)
+        self._forecast_reference.setVisible(self._forecast_overlay_visible)
+
+        self._forecast_bounds = (min(lower), max(upper))
+        annotation = format_forecast_annotation_html(
+            forecast, self._currency_symbol_for_forecast(), saved=is_saved
+        )
+        self._forecast_annotation.setHtml(annotation)
+        # Pin the layout width to the box width so block alignment (the
+        # centered drag-handle line) is honored by the text document.
+        self._forecast_annotation.setTextWidth(
+            self._forecast_annotation.boundingRect().width()
+        )
+        self._forecast_annotation.setColor(QColor("#e1e3ea"))
+        self._forecast_annotation_user_moved = False
+        if self._forecast_annotation_anchor == "hidden" or not self._forecast_overlay_visible:
+            self._forecast_annotation.setVisible(False)
+        else:
+            self._forecast_annotation.setVisible(True)
+            self._position_forecast_annotation()
+        self._fit_view_to_data()
+
+    def set_forecast_overlay_visible(self, visible: bool) -> None:
+        """Shows or hides the forecast layer without clearing its data."""
+        self._forecast_overlay_visible = bool(visible)
+        show = self._forecast is not None and self._forecast_overlay_visible
+        self._forecast_central_curve.setVisible(show)
+        self._forecast_upper_curve.setVisible(show)
+        self._forecast_lower_curve.setVisible(show)
+        self._forecast_fill.setVisible(show)
+        self._forecast_target.setVisible(show)
+        self._forecast_reference.setVisible(show)
+        anchor_hidden = self._forecast_annotation_anchor == "hidden"
+        self._forecast_annotation.setVisible(show and not anchor_hidden)
+        self._fit_view_to_data()
+
+    def _currency_symbol_for_forecast(self) -> Optional[str]:
+        return self._currency_symbol
+
+    def clear_forecast_overlay(self) -> None:
+        """Clears and hides the forecast projection layer."""
+        self._forecast = None
+        self._forecast_is_saved = False
+        self._forecast_bounds = None
+        self._forecast_central_curve.setData([], [])
+        self._forecast_upper_curve.setData([], [])
+        self._forecast_lower_curve.setData([], [])
+        self._forecast_fill.setBrush(pg.mkBrush(QColor(0, 0, 0, 0)))
+        self._forecast_target.setData([], [])
+        self._forecast_reference.setData([], [])
+        self._forecast_central_curve.setVisible(False)
+        self._forecast_upper_curve.setVisible(False)
+        self._forecast_lower_curve.setVisible(False)
+        self._forecast_fill.setVisible(False)
+        self._forecast_target.setVisible(False)
+        self._forecast_reference.setVisible(False)
+        self._forecast_annotation.setVisible(False)
+        self._fit_view_to_data()
+
+    def _position_forecast_annotation(self, *args) -> None:
+        if not self._forecast_annotation.isVisible():
+            return
+        if self._forecast_annotation_user_moved:
+            if self._forecast_annotation_in_view():
+                return
+            self._forecast_annotation_user_moved = False
+        x_lo, x_hi = self.plot_item.vb.viewRange()[0]
+        y_lo, y_hi = self.plot_item.vb.viewRange()[1]
+        if x_hi <= x_lo or y_hi <= y_lo:
+            return
+        anchor = self._forecast_annotation_anchor
+        anchor_point = _FORECAST_ANCHOR_POINTS.get(
+            anchor, _FORECAST_ANCHOR_POINTS["top_right"]
+        )
+        self._forecast_annotation.setAnchor(anchor_point)
+        x_pad = (x_hi - x_lo) * 0.015
+        y_pad = (y_hi - y_lo) * 0.03
+        if anchor in ("top_right", "bottom_right"):
+            x = x_hi - x_pad
+        else:
+            x = x_lo + x_pad
+        if anchor in ("top_right", "top_left"):
+            y = y_hi - y_pad
+        else:
+            y = y_lo + y_pad
+        x, y = self._forecast_annotation_pos_near_path(
+            x, y, anchor, x_lo, x_hi, y_lo, y_hi, x_pad, y_pad
+        )
+        self._forecast_annotation_setting_pos = True
+        try:
+            self._forecast_annotation.setPos(x, y)
+        finally:
+            self._forecast_annotation_setting_pos = False
+
+    def _forecast_annotation_in_view(self) -> bool:
+        x_lo, x_hi = self.plot_item.vb.viewRange()[0]
+        y_lo, y_hi = self.plot_item.vb.viewRange()[1]
+        pos = self._forecast_annotation.pos()
+        return x_lo <= pos.x() <= x_hi and y_lo <= pos.y() <= y_hi
+
+    def _forecast_annotation_box_height(self, view_y_range: float) -> float:
+        scene_height = self._forecast_annotation.sceneBoundingRect().height()
+        vb_height = self.plot_item.vb.geometry().height()
+        if vb_height <= 0 or view_y_range <= 0 or scene_height <= 0:
+            return 0.0
+        box_height = scene_height * view_y_range / vb_height
+        if box_height <= 0 or box_height >= view_y_range:
+            return 0.0
+        return box_height
+
+    def _forecast_annotation_pos_near_path(
+        self,
+        x: float,
+        y: float,
+        anchor: str,
+        x_lo: float,
+        x_hi: float,
+        y_lo: float,
+        y_hi: float,
+        x_pad: float,
+        y_pad: float,
+    ) -> Tuple[float, float]:
+        forecast = self._forecast
+        if forecast is None or not forecast.path_epochs:
+            return x, y
+        xs = [float(v) for v in forecast.path_epochs]
+        if anchor in ("top_right", "top_left"):
+            bands = [float(v) for v in forecast.path_upper]
+        else:
+            bands = [float(v) for v in forecast.path_lower]
+        px0, px1 = xs[0], xs[-1]
+        if px1 <= x_lo or px0 >= x_hi:
+            return x, y
+        vx0, vx1 = max(px0, x_lo), min(px1, x_hi)
+        target_x = vx0 + (vx1 - vx0) * 0.25
+        idx = min(range(len(xs)), key=lambda i: abs(xs[i] - target_x))
+        band = bands[idx]
+        if band <= y_lo or band >= y_hi:
+            return x, y
+        box_h = self._forecast_annotation_box_height(y_hi - y_lo)
+        if box_h <= 0:
+            return x, y
+        if anchor in ("top_right", "top_left"):
+            lo_y = y_lo + y_pad + box_h
+            hi_y = y_hi - y_pad
+            if lo_y >= hi_y:
+                return x, hi_y
+            y = min(max(band + y_pad + box_h, lo_y), hi_y)
+        else:
+            lo_y = y_lo + y_pad
+            hi_y = y_hi - y_pad - box_h
+            if hi_y <= lo_y:
+                return x, lo_y
+            y = min(max(band - y_pad - box_h, lo_y), hi_y)
+        return x, y
+
+    def set_forecast_annotation_anchor(self, anchor: str) -> None:
+        """Places the forecast info box at a corner, hides it, or keeps it as-is.
+
+        Called with the persisted anchor on startup and whenever the user picks
+        a new anchor from the info box's context menu. A subsequent manual
+        drag takes precedence until the next forecast is displayed.
+        """
+        normalized = normalize_forecast_annotation_anchor(anchor)
+        self._forecast_annotation_anchor = normalized
+        self._forecast_annotation_user_moved = False
+        if normalized == "hidden":
+            self._forecast_annotation.setVisible(False)
+            return
+        if self._forecast is None:
+            return
+        self._forecast_annotation.setVisible(True)
+        self._position_forecast_annotation()
+
+    def _on_forecast_annotation_user_moved(self) -> None:
+        if self._forecast_annotation_setting_pos:
+            return
+        self._forecast_annotation_user_moved = True
+
+    def _on_forecast_annotation_anchor_chosen(self, anchor: str) -> None:
+        self.set_forecast_annotation_anchor(anchor)
+        self.forecast_annotation_anchor_changed.emit(self._forecast_annotation_anchor)
 
     def set_swing_overlay(
         self,

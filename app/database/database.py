@@ -10,6 +10,11 @@ from app.database.schema import (
     FILL_FIRST_DOWNLOAD,
     CREATE_EARNINGS_TABLE,
     CREATE_EARNINGS_META_TABLE,
+    CREATE_FORECASTS_TABLE,
+    CREATE_FORECASTS_TICKER_INDEX,
+    CREATE_FORECASTS_TARGET_INDEX,
+    CREATE_FORECASTS_GENERATED_INDEX,
+    CREATE_FORECASTS_STATUS_INDEX,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +46,11 @@ class Database:
                 cursor.execute(CREATE_METADATA_TABLE)
                 cursor.execute(CREATE_EARNINGS_TABLE)
                 cursor.execute(CREATE_EARNINGS_META_TABLE)
+                cursor.execute(CREATE_FORECASTS_TABLE)
+                cursor.execute(CREATE_FORECASTS_TICKER_INDEX)
+                cursor.execute(CREATE_FORECASTS_TARGET_INDEX)
+                cursor.execute(CREATE_FORECASTS_GENERATED_INDEX)
+                cursor.execute(CREATE_FORECASTS_STATUS_INDEX)
                 self._migrate_metadata_table(cursor)
                 conn.commit()
             logger.info(f"Database schema initialized successfully at {self.db_path}")

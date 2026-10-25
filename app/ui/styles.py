@@ -162,6 +162,7 @@ QLineEdit:focus {
 /* Tables */
 QTableWidget {
     background-color: #1a1c24;
+    alternate-background-color: #1e2029;
     border: 1px solid #282b36;
     gridline-color: #282b36;
     border-radius: 4px;

@@ -56,3 +56,46 @@ CREATE TABLE IF NOT EXISTS earnings_meta (
     fetched_at TEXT
 );
 """
+
+CREATE_FORECASTS_TABLE = """
+CREATE TABLE IF NOT EXISTS forecasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    reference_date TEXT NOT NULL,
+    reference_close REAL NOT NULL,
+    target_date TEXT NOT NULL,
+    horizon_months INTEGER NOT NULL,
+    directional_bias TEXT NOT NULL,
+    central_estimate REAL NOT NULL,
+    lower_estimate REAL NOT NULL,
+    upper_estimate REAL NOT NULL,
+    expected_change_pct REAL NOT NULL,
+    model_version TEXT NOT NULL,
+    input_snapshot_json TEXT NOT NULL,
+    signal_summary_json TEXT NOT NULL,
+    evaluation_status TEXT NOT NULL DEFAULT 'pending',
+    actual_price REAL,
+    actual_date TEXT,
+    actual_change_pct REAL,
+    absolute_error REAL,
+    percentage_error REAL,
+    evaluated_at TEXT
+);
+"""
+
+CREATE_FORECASTS_TICKER_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_forecasts_ticker ON forecasts (ticker);
+"""
+
+CREATE_FORECASTS_TARGET_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_forecasts_target_date ON forecasts (target_date);
+"""
+
+CREATE_FORECASTS_GENERATED_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_forecasts_generated_at ON forecasts (generated_at);
+"""
+
+CREATE_FORECASTS_STATUS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_forecasts_evaluation_status ON forecasts (evaluation_status);
+"""

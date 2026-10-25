@@ -23,6 +23,15 @@ from PySide6.QtWidgets import (
 
 from app.models.time_range import TimeRange
 from app.models.chart_type import ChartType
+from app.models.forecast import (
+    Forecast,
+    ForecastHorizon,
+    DirectionalBias,
+    FORECAST_FILTERS,
+    FORECAST_FILTER_LABELS,
+    forecast_matches_filter,
+    normalize_forecast_filter,
+)
 from app.models.ticker import TickerConfig, TickerSummary
 from app.services.ticker_service import TickerService
 from app.services.market_data_service import (
@@ -41,6 +50,8 @@ from app.services.technical_indicators import (
 from app.services.market_structure import classify_structure, compute_label_positions
 from app.services.swing_levels import compute_swing_levels
 from app.services.earnings_service import EarningsService
+from app.services.forecast_service import ForecastService
+from app.services.forecast_engine import ForecastError
 from app.services.swing_detection import (
     SwingAlgorithm,
     SwingRangeMode,
@@ -65,6 +76,7 @@ from app.ui.chart_widget import StockChartWidget
 from app.ui.ticker_dialog import TickerAdminDialog
 from app.ui.filter_settings_dialog import FilterSettingsDialog
 from app.ui.swing_settings_dialog import SwingSettingsDialog
+from app.ui.forecast_history_dialog import ForecastHistoryDialog
 from app.ui.trend_filter_bar import TrendFilterBar
 from app.ui.update_dialog import UpdateProgressDialog
 from app.workers.update_worker import UpdateWorker
@@ -82,12 +94,14 @@ class MainWindow(QMainWindow):
         market_data_service: MarketDataService,
         sync_service: SyncService,
         earnings_service: EarningsService,
+        forecast_service: ForecastService,
     ):
         super().__init__()
         self.ticker_service = ticker_service
         self.market_data_service = market_data_service
         self.sync_service = sync_service
         self.earnings_service = earnings_service
+        self.forecast_service = forecast_service
 
         self.setWindowTitle("tickerMon - Stock Market Terminal")
         self.resize(1480, 780)
@@ -97,6 +111,10 @@ class MainWindow(QMainWindow):
         self._active_chart_type = ChartType.LINE
         self._active_noise_algo = NoiseReductionAlgorithm.NONE
         self._active_swing_algo = SwingAlgorithm.RANGE
+        self._forecast_horizon = ForecastHorizon.OFF
+        self._active_forecast: Optional[Forecast] = None
+        self._displaying_saved_forecast = False
+        self._forecast_filter = "off"
         self._current_summary: Optional[TickerSummary] = None
         self._period_start_price: Optional[float] = None
         self._update_worker: Optional[UpdateWorker] = None
@@ -288,6 +306,102 @@ class MainWindow(QMainWindow):
 
         filter_stack.addLayout(swing_range_row)
 
+        forecast_row = QHBoxLayout()
+        forecast_row.setSpacing(8)
+
+        forecast_label = QLabel("Forecast:", toolbar_frame)
+        forecast_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+        forecast_row.addWidget(forecast_label)
+
+        self.combo_forecast = QComboBox(toolbar_frame)
+        self.combo_forecast.setToolTip(
+            "Show a price projection for the selected horizon.\n"
+            "Forecasts are estimates generated from local data — not advice."
+        )
+        for horizon in ForecastHorizon:
+            self.combo_forecast.addItem(horizon.value, userData=horizon)
+        self.combo_forecast.setStyleSheet("""
+            QComboBox {
+                background-color: #252836;
+                color: #e1e3ea;
+                border: 1px solid #323647;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-weight: 600;
+                min-width: 96px;
+            }
+            QComboBox:hover {
+                border-color: #454b61;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1c24;
+                color: #e1e3ea;
+                selection-background-color: #2962ff;
+            }
+        """)
+        self.combo_forecast.currentIndexChanged.connect(self._on_forecast_horizon_changed)
+        forecast_row.addWidget(self.combo_forecast)
+
+        forecast_filter_label = QLabel("Filter:", toolbar_frame)
+        forecast_filter_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+        forecast_row.addWidget(forecast_filter_label)
+
+        self.combo_forecast_filter = QComboBox(toolbar_frame)
+        self.combo_forecast_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.combo_forecast_filter.setToolTip(
+            "Filter forecasts everywhere using saved forecast data:\n"
+            "the sidebar list, the chart overlay and the Forecast History\n"
+            "direction filter all follow this selection."
+        )
+        for key in FORECAST_FILTERS:
+            self.combo_forecast_filter.addItem(FORECAST_FILTER_LABELS[key], userData=key)
+        self.combo_forecast_filter.setStyleSheet("""
+            QComboBox {
+                background-color: #252836;
+                color: #e1e3ea;
+                border: 1px solid #323647;
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-weight: 600;
+                min-width: 96px;
+            }
+            QComboBox:hover {
+                border-color: #454b61;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1c24;
+                color: #e1e3ea;
+                selection-background-color: #2962ff;
+            }
+        """)
+        self.combo_forecast_filter.currentIndexChanged.connect(
+            self._on_forecast_filter_changed
+        )
+        forecast_row.addWidget(self.combo_forecast_filter)
+
+        self.btn_forecast_generate = QPushButton("Generate", toolbar_frame)
+        self.btn_forecast_generate.setToolTip(
+            "Generate a forecast for the selected ticker using the current\n"
+            "filter and swing configuration (does not save it)."
+        )
+        self.btn_forecast_generate.clicked.connect(self._on_generate_forecast_clicked)
+        forecast_row.addWidget(self.btn_forecast_generate)
+
+        self.btn_forecast_save = QPushButton("Save", toolbar_frame)
+        self.btn_forecast_save.setToolTip("Persist the current forecast to the local database")
+        self.btn_forecast_save.clicked.connect(self._on_save_forecast_clicked)
+        forecast_row.addWidget(self.btn_forecast_save)
+
+        self.btn_forecast_history = QPushButton("History…", toolbar_frame)
+        self.btn_forecast_history.setToolTip("Browse, evaluate and delete saved forecasts")
+        self.btn_forecast_history.clicked.connect(self._on_open_forecast_history)
+        forecast_row.addWidget(self.btn_forecast_history)
+
+        forecast_row.addStretch()
+
+        self.btn_forecast_generate.setEnabled(False)
+        self.btn_forecast_save.setEnabled(False)
+
         self.filter_stack_widget.setMinimumWidth(
             max(
                 noise_row.sizeHint().width(),
@@ -340,12 +454,21 @@ class MainWindow(QMainWindow):
 
         range_stack.addLayout(range_row)
 
+        # Forecast controls sit between the range buttons and the chart type row
+        range_stack.addLayout(forecast_row)
+
         chart_row = QHBoxLayout()
         chart_row.setSpacing(8)
 
         # Price Chart Type Selector (Line / Candle / Baseline)
         chart_label = QLabel("Chart type:", toolbar_frame)
         chart_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+
+        forecast_label_width = max(
+            forecast_label.sizeHint().width(), chart_label.sizeHint().width()
+        )
+        forecast_label.setFixedWidth(forecast_label_width)
+        chart_label.setFixedWidth(forecast_label_width)
 
         chart_row.addWidget(chart_label)
 
@@ -571,6 +694,9 @@ class MainWindow(QMainWindow):
         self.chart_widget = StockChartWidget(right_panel)
         self.chart_widget.hover_changed.connect(self._on_chart_hover_changed)
         self.chart_widget.hover_left.connect(self._on_chart_hover_left)
+        self.chart_widget.forecast_annotation_anchor_changed.connect(
+            self.ticker_service.set_forecast_annotation_anchor
+        )
         right_layout.addWidget(self.chart_widget)
 
         splitter.addWidget(right_panel)
@@ -617,7 +743,35 @@ class MainWindow(QMainWindow):
         self.chart_widget.set_structure_labels_visible(self.chk_structure_labels.isChecked())
         self.chk_structure_labels.blockSignals(False)
 
+        self._forecast_horizon = self.ticker_service.get_forecast_horizon()
+        forecast_index = self.combo_forecast.findData(self._forecast_horizon)
+        self.combo_forecast.blockSignals(True)
+        self.combo_forecast.setCurrentIndex(forecast_index if forecast_index >= 0 else 0)
+        self.combo_forecast.blockSignals(False)
+        self._update_forecast_buttons()
+        self.chart_widget.set_forecast_annotation_anchor(
+            self.ticker_service.get_forecast_annotation_anchor()
+        )
+
+        self._forecast_filter = self.ticker_service.get_forecast_filter()
+        filter_index = self.combo_forecast_filter.findData(self._forecast_filter)
+        self.combo_forecast_filter.blockSignals(True)
+        self.combo_forecast_filter.setCurrentIndex(filter_index if filter_index >= 0 else 0)
+        self.combo_forecast_filter.blockSignals(False)
+        self._apply_forecast_filter()
+
         self._refresh_ticker_list(select_symbol=target_ticker)
+
+        # Evaluate any pending forecasts against locally stored data (no network).
+        try:
+            evaluated, unavailable, pending = self.forecast_service.evaluate_on_startup()
+            if evaluated or unavailable:
+                logger.info(
+                    f"Startup forecast evaluation: {evaluated} evaluated, "
+                    f"{unavailable} unavailable, {pending} pending."
+                )
+        except Exception as e:
+            logger.warning(f"Startup forecast evaluation failed: {e}")
 
     def _refresh_ticker_list(self, select_symbol: Optional[str] = None) -> None:
         """Reloads sidebar summaries and trend bucket counts for the active time range."""
@@ -685,6 +839,7 @@ class MainWindow(QMainWindow):
             self.chart_widget.clear_structure_labels()
             self.chart_widget.clear_earnings_events()
             self._earnings_events = []
+            self._clear_forecast_overlay()
             self.chart_widget.show_empty_state(
                 True,
                 f"No local market data available for '{symbol}'.\nPress 'Update all tickers' (Ctrl+U) to download prices from Yahoo Finance."
@@ -746,6 +901,12 @@ class MainWindow(QMainWindow):
 
             # Earnings markers from the local cache (network refresh is async)
             self._load_earnings_for_symbol(symbol, summary.company_name)
+
+            # Forecast projection for the active horizon (local data only)
+            if self._forecast_horizon != ForecastHorizon.OFF:
+                self._regenerate_forecast()
+            else:
+                self._clear_forecast_overlay()
 
             self.status_bar.showMessage(f"Loaded {len(prices)} historical points for {symbol} ({self._active_range.display_name}).")
 
@@ -993,11 +1154,13 @@ class MainWindow(QMainWindow):
             self._active_noise_algo = NoiseReductionAlgorithm.NONE
         self.combo_noise.setCurrentIndex(index)
         self.combo_noise.blockSignals(False)
+        self.forecast_service.active_filter_algorithm = self._active_noise_algo
 
     def _on_noise_algorithm_changed(self, index: int) -> None:
         algo = self.combo_noise.itemData(index)
         if algo:
             self._active_noise_algo = algo
+            self.forecast_service.active_filter_algorithm = algo
             selected_symbol = self.ticker_list.get_selected_symbol()
             if selected_symbol:
                 self._on_ticker_selected(selected_symbol)
@@ -1021,12 +1184,14 @@ class MainWindow(QMainWindow):
         self.combo_swing.setCurrentIndex(index)
         self._update_swing_tooltip()
         self.combo_swing.blockSignals(False)
+        self.forecast_service.active_swing_algorithm = self._active_swing_algo
 
     def _on_swing_algorithm_changed(self, index: int) -> None:
         algorithm = self.combo_swing.itemData(index)
         if not algorithm:
             return
         self._active_swing_algo = algorithm
+        self.forecast_service.active_swing_algorithm = algorithm
         self._update_swing_tooltip()
         self.trend_filter_bar.set_swing_algorithm(algorithm.value)
         self._refresh_ticker_list()
@@ -1213,6 +1378,177 @@ class MainWindow(QMainWindow):
         self._refresh_ticker_list(select_symbol=curr_sym)
         if curr_sym:
             self._on_ticker_selected(curr_sym)
+        # Newly downloaded data may make pending forecasts evaluable.
+        try:
+            evaluated, _, pending = self.forecast_service.evaluate_pending()
+            if evaluated:
+                self.status_bar.showMessage(
+                    f"Update completed: {success_count} successful, {fail_count} failed. "
+                    f"{evaluated} forecast(s) evaluated ({pending} pending)."
+                )
+        except Exception as e:
+            logger.warning(f"Post-update forecast evaluation failed: {e}")
+
+    def _update_forecast_buttons(self) -> None:
+        enabled = self._forecast_horizon != ForecastHorizon.OFF
+        self.btn_forecast_generate.setEnabled(enabled)
+        self.btn_forecast_save.setEnabled(enabled and self._active_forecast is not None)
+
+    def _on_forecast_horizon_changed(self, index: int) -> None:
+        horizon = self.combo_forecast.itemData(index)
+        if not horizon:
+            return
+        self._forecast_horizon = horizon
+        self.ticker_service.set_forecast_horizon(horizon)
+        self._update_forecast_buttons()
+        if horizon == ForecastHorizon.OFF:
+            self._clear_forecast_overlay()
+            self.status_bar.showMessage("Forecast overlay turned off.")
+            return
+        self._regenerate_forecast()
+
+    def _on_forecast_filter_changed(self, index: int) -> None:
+        self._forecast_filter = normalize_forecast_filter(
+            self.combo_forecast_filter.itemData(index)
+        )
+        self.ticker_service.set_forecast_filter(self._forecast_filter)
+        self._apply_forecast_filter()
+
+    def _apply_forecast_filter(self) -> None:
+        """Applies the forecast filter to the sidebar list and the chart overlay."""
+        key = normalize_forecast_filter(self._forecast_filter)
+        active = key != "off"
+        symbols: set = set()
+        if active:
+            try:
+                latest = self.forecast_service.latest_forecast_by_ticker()
+            except Exception as e:
+                logger.warning(f"Forecast filter lookup failed: {e}")
+                latest = {}
+            symbols = {
+                ticker
+                for ticker, forecast in latest.items()
+                if forecast_matches_filter(forecast, key)
+            }
+        self.ticker_list.set_forecast_filter(active, symbols)
+        if self._active_forecast is not None:
+            self.chart_widget.set_forecast_overlay_visible(
+                forecast_matches_filter(self._active_forecast, key)
+            )
+
+    def _on_history_direction_filter_changed(self, direction: str) -> None:
+        key = normalize_forecast_filter(
+            DirectionalBias.from_str(direction).value.lower() if direction else "off"
+        )
+        index = self.combo_forecast_filter.findData(key)
+        if index >= 0 and index != self.combo_forecast_filter.currentIndex():
+            self.combo_forecast_filter.setCurrentIndex(index)
+
+    def _regenerate_forecast(self) -> None:
+        """Generates a fresh forecast for the selected ticker and horizon."""
+        if self._forecast_horizon == ForecastHorizon.OFF:
+            return
+        symbol = self.ticker_list.get_selected_symbol()
+        if not symbol:
+            self._clear_forecast_overlay()
+            return
+        try:
+            forecast = self.forecast_service.generate(symbol, self._forecast_horizon)
+        except ForecastError as e:
+            self._clear_forecast_overlay()
+            self.status_bar.showMessage(f"Forecast unavailable: {e}")
+            QMessageBox.information(self, "Forecast", str(e))
+            return
+        except Exception as e:
+            logger.error(f"Forecast generation failed for {symbol}: {e}")
+            self._clear_forecast_overlay()
+            self.status_bar.showMessage(f"Forecast failed: {e}")
+            return
+        self._active_forecast = forecast
+        self._displaying_saved_forecast = False
+        self.chart_widget.set_forecast_overlay(forecast, is_saved=False)
+        self.chart_widget.set_forecast_overlay_visible(
+            forecast_matches_filter(forecast, self._forecast_filter)
+        )
+        self._update_forecast_buttons()
+        self.status_bar.showMessage(
+            f"Forecast generated for {symbol}: {forecast.horizon_label}, "
+            f"bias {forecast.directional_bias.lower()}, "
+            f"target {forecast.target_date}."
+        )
+
+    def _clear_forecast_overlay(self) -> None:
+        self._active_forecast = None
+        self._displaying_saved_forecast = False
+        self.chart_widget.clear_forecast_overlay()
+        self._update_forecast_buttons()
+
+    def _on_generate_forecast_clicked(self) -> None:
+        self._regenerate_forecast()
+
+    def _on_save_forecast_clicked(self) -> None:
+        forecast = self._active_forecast
+        if forecast is None or self._displaying_saved_forecast:
+            QMessageBox.information(
+                self, "Save Forecast", "Generate a forecast before saving."
+            )
+            return
+        ok, message, is_duplicate = self.forecast_service.save(forecast)
+        if not ok:
+            QMessageBox.warning(self, "Save Forecast", message)
+            return
+        if is_duplicate:
+            answer = QMessageBox.question(
+                self,
+                "Duplicate Forecast",
+                "An identical forecast is already saved.\nSave another copy anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+            ok, message, _ = self.forecast_service.save(forecast)
+            if not ok:
+                QMessageBox.warning(self, "Save Forecast", message)
+                return
+        self.status_bar.showMessage(message)
+        QMessageBox.information(self, "Save Forecast", message)
+
+    def _on_open_forecast_history(self) -> None:
+        direction = None
+        if self._forecast_filter in ("bullish", "bearish", "neutral"):
+            direction = DirectionalBias.from_str(self._forecast_filter).value
+        dlg = ForecastHistoryDialog(
+            self.forecast_service, self, direction_filter=direction
+        )
+        dlg.show_forecast_requested.connect(self._on_show_saved_forecast)
+        dlg.direction_filter_changed.connect(self._on_history_direction_filter_changed)
+        dlg.exec()
+
+    def _on_show_saved_forecast(self, record) -> None:
+        """Displays a saved forecast snapshot on the chart (never regenerated)."""
+        forecast = record.forecast
+        selected = self.ticker_list.get_selected_symbol() or ""
+        if forecast.ticker != selected:
+            # Only show forecasts for the currently selected ticker so the
+            # historical series behind the projection stays consistent.
+            QMessageBox.information(
+                self,
+                "Show Forecast",
+                f"This forecast is for {forecast.ticker}. "
+                f"Select {forecast.ticker} in the market watch to display it.",
+            )
+            return
+        self._active_forecast = forecast
+        self._displaying_saved_forecast = True
+        self.chart_widget.set_forecast_overlay(forecast, is_saved=True)
+        self.chart_widget.set_forecast_overlay_visible(
+            forecast_matches_filter(forecast, self._forecast_filter)
+        )
+        self.status_bar.showMessage(
+            f"Showing saved forecast #{record.id} for {forecast.ticker} "
+            f"({forecast.horizon_label}, generated {forecast.generated_at})."
+        )
 
     def closeEvent(self, event) -> None:
         """Joins the background earnings refresh so the thread dies with the window."""

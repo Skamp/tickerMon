@@ -223,6 +223,87 @@ class ConfigManager:
             logger.error(f"Failed to save structure label setting: {e}")
             return False
 
+    def load_forecast_horizon(self) -> Optional[str]:
+        """Returns the configured forecast horizon, or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("forecast_horizon")
+        except Exception as e:
+            logger.error(f"Error reading forecast horizon setting: {e}")
+            return None
+
+    def save_forecast_horizon(self, horizon: str) -> bool:
+        """Saves the selected forecast horizon (Off / 1 Month / 2 Months / 3 Months)."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["forecast_horizon"] = horizon
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved forecast horizon setting to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save forecast horizon setting: {e}")
+            return False
+
+    def load_forecast_annotation_anchor(self) -> Optional[str]:
+        """Returns the configured forecast annotation anchor, or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("forecast_annotation_anchor")
+        except Exception as e:
+            logger.error(f"Error reading forecast annotation anchor: {e}")
+            return None
+
+    def save_forecast_annotation_anchor(self, anchor: str) -> bool:
+        """Saves the forecast info-box anchor (corner positions or hidden)."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["forecast_annotation_anchor"] = anchor
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved forecast annotation anchor to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save forecast annotation anchor: {e}")
+            return False
+
+    def load_forecast_filter(self) -> Optional[str]:
+        """Returns the configured forecast filter key, or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("forecast_filter")
+        except Exception as e:
+            logger.error(f"Error reading forecast filter setting: {e}")
+            return None
+
+    def save_forecast_filter(self, filter_key: str) -> bool:
+        """Saves the forecast filter applied across sidebar, chart and history."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["forecast_filter"] = filter_key
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved forecast filter setting to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save forecast filter setting: {e}")
+            return False
+
     def _read_raw_config(self) -> Dict[str, Any]:
         if not self.config_path.exists():
             return {}

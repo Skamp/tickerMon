@@ -405,3 +405,35 @@ class MarketDataService:
             self._warmup_cache.clear()
         self._warmup_cache[cache_key] = result
         return result
+
+    def get_full_ohlcv(
+        self, symbol: str
+    ) -> Tuple[List[float], List[float], List[float], List[float], List[float], List[str]]:
+        """Returns the complete stored history scaled like the chart series.
+
+        Provides ``(timestamps, opens, highs, lows, closes, date_labels)`` for
+        all local rows of a symbol. Used by the forecasting engine so its
+        inputs are independent of the visible chart range (no network access).
+        OHLC values are scaled by the close/adjusted-close ratio exactly like
+        ``get_chart_ohlcv``; closes are adjusted (or raw when adjusted is
+        missing), matching ``get_chart_data``.
+        """
+        points = self.repo.get_prices(symbol)
+
+        timestamps: List[float] = []
+        opens: List[float] = []
+        highs: List[float] = []
+        lows: List[float] = []
+        closes: List[float] = []
+        date_labels: List[str] = []
+
+        for p, dt, val in self._iter_priced_points(points):
+            ratio = (p.adj_close / p.close) if (p.adj_close and p.close and p.close > 0) else 1.0
+            timestamps.append(dt.timestamp())
+            opens.append((p.open or 0.0) * ratio)
+            highs.append((p.high or 0.0) * ratio)
+            lows.append((p.low or 0.0) * ratio)
+            closes.append(float(val) if val is not None else 0.0)
+            date_labels.append(p.timestamp)
+
+        return timestamps, opens, highs, lows, closes, date_labels

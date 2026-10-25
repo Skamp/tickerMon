@@ -8,12 +8,13 @@ from PySide6.QtCore import Qt
 
 from app.config.config_manager import ConfigManager
 from app.database.database import Database
-from app.database.repositories import MarketDataRepository
+from app.database.repositories import ForecastRepository, MarketDataRepository
 from app.services.yahoo_service import YahooService
 from app.services.market_data_service import MarketDataService
 from app.services.ticker_service import TickerService
 from app.services.sync_service import SyncService
 from app.services.earnings_service import EarningsService
+from app.services.forecast_service import ForecastService
 from app.ui.styles import DARK_THEME_QSS
 from app.ui.main_window import MainWindow
 
@@ -56,12 +57,16 @@ def main() -> None:
         config_manager = ConfigManager(config_path)
         database = Database(db_path)
         repo = MarketDataRepository(database)
+        forecast_repo = ForecastRepository(database)
 
         yahoo_service = YahooService()
         market_data_service = MarketDataService(repo)
         ticker_service = TickerService(config_manager)
         sync_service = SyncService(yahoo_service, repo)
         earnings_service = EarningsService(yahoo_service, repo)
+        forecast_service = ForecastService(
+            market_data_service, ticker_service, forecast_repo, price_repo=repo
+        )
 
         # Launch Main Window
         window = MainWindow(
@@ -69,6 +74,7 @@ def main() -> None:
             market_data_service=market_data_service,
             sync_service=sync_service,
             earnings_service=earnings_service,
+            forecast_service=forecast_service,
         )
         window.show()
 
