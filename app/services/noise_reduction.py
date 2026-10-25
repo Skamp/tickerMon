@@ -12,7 +12,7 @@ class NoiseReductionAlgorithm(Enum):
     EMA = "Exponential Moving Average (EMA)"
     EMA50 = "Exponential MA (EMA 50)"
     EMA200 = "Exponential MA (EMA 200)"
-    EMA20 = "EMA 20"
+    EMA20 = "Exponential MA (EMA 20)"
     ATR2 = "ATR14 x 2"
     ATR4 = "ATR14 x 4"
     SAVITZKY_GOLAY = "Savitzky-Golay Filter"
@@ -34,6 +34,8 @@ class NoiseReductionAlgorithm(Enum):
 
     @classmethod
     def from_str(cls, val: str) -> "NoiseReductionAlgorithm":
+        if val in ("EMA 20", "EMA20"):
+            return cls.EMA20
         for item in cls:
             if item.value == val or item.name == val:
                 return item

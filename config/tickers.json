@@ -1,5 +1,5 @@
 {
-    "selected_ticker": "285A.T",
+    "selected_ticker": "LLY",
     "selected_range": "6M",
     "tickers": [
         {
@@ -302,7 +302,7 @@
         "Exponential Moving Average (EMA)",
         "Exponential MA (EMA 50)",
         "Exponential MA (EMA 200)",
-        "EMA 20",
+        "Exponential MA (EMA 20)",
         "ATR14 x 2",
         "ATR14 x 4",
         "Savitzky-Golay Filter",
@@ -445,6 +445,6 @@
     },
     "chart_type": "Baseline",
     "show_structure_labels": false,
-    "forecast_horizon": "Off",
+    "forecast_horizon": "2 Months",
     "forecast_filter": "off"
 }

@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import Optional, List, Dict
 
 from PySide6.QtCore import Qt, QSize, QTimer
@@ -27,8 +28,6 @@ from app.models.forecast import (
     Forecast,
     ForecastHorizon,
     DirectionalBias,
-    FORECAST_FILTERS,
-    FORECAST_FILTER_LABELS,
     forecast_matches_filter,
     normalize_forecast_filter,
 )
@@ -342,42 +341,6 @@ class MainWindow(QMainWindow):
         self.combo_forecast.currentIndexChanged.connect(self._on_forecast_horizon_changed)
         forecast_row.addWidget(self.combo_forecast)
 
-        forecast_filter_label = QLabel("Filter:", toolbar_frame)
-        forecast_filter_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
-        forecast_row.addWidget(forecast_filter_label)
-
-        self.combo_forecast_filter = QComboBox(toolbar_frame)
-        self.combo_forecast_filter.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        self.combo_forecast_filter.setToolTip(
-            "Filter forecasts everywhere using saved forecast data:\n"
-            "the sidebar list, the chart overlay and the Forecast History\n"
-            "direction filter all follow this selection."
-        )
-        for key in FORECAST_FILTERS:
-            self.combo_forecast_filter.addItem(FORECAST_FILTER_LABELS[key], userData=key)
-        self.combo_forecast_filter.setStyleSheet("""
-            QComboBox {
-                background-color: #252836;
-                color: #e1e3ea;
-                border: 1px solid #323647;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-weight: 600;
-                min-width: 96px;
-            }
-            QComboBox:hover {
-                border-color: #454b61;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1a1c24;
-                color: #e1e3ea;
-                selection-background-color: #2962ff;
-            }
-        """)
-        self.combo_forecast_filter.currentIndexChanged.connect(
-            self._on_forecast_filter_changed
-        )
-        forecast_row.addWidget(self.combo_forecast_filter)
 
         self.btn_forecast_generate = QPushButton("Generate", toolbar_frame)
         self.btn_forecast_generate.setToolTip(
@@ -753,11 +716,7 @@ class MainWindow(QMainWindow):
             self.ticker_service.get_forecast_annotation_anchor()
         )
 
-        self._forecast_filter = self.ticker_service.get_forecast_filter()
-        filter_index = self.combo_forecast_filter.findData(self._forecast_filter)
-        self.combo_forecast_filter.blockSignals(True)
-        self.combo_forecast_filter.setCurrentIndex(filter_index if filter_index >= 0 else 0)
-        self.combo_forecast_filter.blockSignals(False)
+        self._forecast_filter = "off"
         self._apply_forecast_filter()
 
         self._refresh_ticker_list(select_symbol=target_ticker)
@@ -905,7 +864,11 @@ class MainWindow(QMainWindow):
             # Forecast projection for the active horizon (local data only)
             if self._forecast_horizon != ForecastHorizon.OFF:
                 self._regenerate_forecast()
-            else:
+            elif not (
+                self._displaying_saved_forecast
+                and self._active_forecast is not None
+                and self._active_forecast.ticker == symbol
+            ):
                 self._clear_forecast_overlay()
 
             self.status_bar.showMessage(f"Loaded {len(prices)} historical points for {symbol} ({self._active_range.display_name}).")
@@ -939,6 +902,103 @@ class MainWindow(QMainWindow):
             self.chart_widget.clear_overlay()
             return
         self.chart_widget.set_overlay_data(timestamps, ema, color="#26c6da", label="EMA20")
+
+    def _apply_forecast_filter_extension(self) -> None:
+        """Extends the active filter curve into the forecast region.
+
+        Continues the active filter curve seamlessly from the last historical
+        filter point through the forecast central path, passing the resulting
+        projection to the chart as a dashed continuation. ATR variants are
+        skipped because they require OHLCV data that forecasts do not provide.
+        """
+        forecast = self._active_forecast
+        algorithm = self._active_noise_algo
+
+        if (
+            forecast is None
+            or not forecast.path_epochs
+            or algorithm == NoiseReductionAlgorithm.NONE
+            or algorithm in (NoiseReductionAlgorithm.ATR2, NoiseReductionAlgorithm.ATR4)
+            or not self._chart_timestamps
+            or not self._chart_prices
+        ):
+            self.chart_widget.clear_forecast_filter_curve()
+            return
+
+        hist_ts = self._chart_timestamps
+        hist_prices = self._chart_prices
+        fc_ts = [float(t) for t in forecast.path_epochs]
+        fc_prices = [float(p) for p in forecast.path_central]
+        n_fc = len(fc_ts)
+        if n_fc < 1 or len(fc_prices) < 1:
+            self.chart_widget.clear_forecast_filter_curve()
+            return
+
+        color = "#26c6da" if algorithm == NoiseReductionAlgorithm.EMA20 else "#ffab00"
+
+        _ema_spans = {
+            NoiseReductionAlgorithm.EMA20: 20,
+            NoiseReductionAlgorithm.EMA: 10,
+            NoiseReductionAlgorithm.EMA50: 50,
+            NoiseReductionAlgorithm.EMA200: 200,
+        }
+
+        if algorithm in _ema_spans:
+            last_ema = None
+            if self.chart_widget._overlay_y:
+                val = self.chart_widget._overlay_y[-1]
+                if val is not None and math.isfinite(val):
+                    last_ema = float(val)
+            if last_ema is None:
+                if algorithm == NoiseReductionAlgorithm.EMA20:
+                    warm = self._compute_warmup_indicator(
+                        hist_ts, hist_prices, lambda closes: compute_ema(closes, 20)
+                    )
+                    last_ema = float(warm[-1]) if warm and warm[-1] is not None else float(hist_prices[-1])
+                else:
+                    _, red_y = reduce_noise(algorithm, hist_ts, hist_prices)
+                    last_ema = float(red_y[-1]) if red_y else float(hist_prices[-1])
+
+            span = _ema_spans[algorithm]
+            alpha = 2.0 / (span + 1.0)
+            ext_ts = [fc_ts[0]]
+            ext_prices = [last_ema]
+            for t in range(1, n_fc):
+                last_ema = alpha * fc_prices[t] + (1.0 - alpha) * last_ema
+                ext_ts.append(fc_ts[t])
+                ext_prices.append(last_ema)
+        else:
+            if fc_ts and hist_ts and fc_ts[0] == hist_ts[-1]:
+                feed_ts = hist_ts + fc_ts[1:]
+                feed_prices = hist_prices + fc_prices[1:]
+            else:
+                feed_ts = hist_ts + fc_ts
+                feed_prices = hist_prices + fc_prices
+
+            red_x, red_y = reduce_noise(algorithm, feed_ts, feed_prices)
+            if not red_x or not red_y:
+                self.chart_widget.clear_forecast_filter_curve()
+                return
+
+            if len(red_x) == len(feed_ts):
+                ext_ts = list(red_x[-n_fc:])
+                ext_prices = list(red_y[-n_fc:])
+            else:
+                pts = [(x, y) for x, y in zip(red_x, red_y) if x >= fc_ts[0]]
+                if pts:
+                    ext_ts = [p[0] for p in pts]
+                    ext_prices = [p[1] for p in pts]
+                    if self.chart_widget._overlay_y and ext_ts[0] > fc_ts[0]:
+                        ext_ts.insert(0, fc_ts[0])
+                        ext_prices.insert(0, float(self.chart_widget._overlay_y[-1]))
+                else:
+                    self.chart_widget.clear_forecast_filter_curve()
+                    return
+
+            if self.chart_widget._overlay_y and ext_prices:
+                ext_prices[0] = float(self.chart_widget._overlay_y[-1])
+
+        self.chart_widget.set_forecast_filter_curve(ext_ts, ext_prices, color=color)
 
     def _apply_atr_overlay(
         self,
@@ -1164,6 +1224,8 @@ class MainWindow(QMainWindow):
             selected_symbol = self.ticker_list.get_selected_symbol()
             if selected_symbol:
                 self._on_ticker_selected(selected_symbol)
+            if self._active_forecast is not None:
+                self._apply_forecast_filter_extension()
 
     def _rebuild_swing_combo(self) -> None:
         """Repopulates the swing combo with only the enabled swing detection algorithms."""
@@ -1407,12 +1469,7 @@ class MainWindow(QMainWindow):
             return
         self._regenerate_forecast()
 
-    def _on_forecast_filter_changed(self, index: int) -> None:
-        self._forecast_filter = normalize_forecast_filter(
-            self.combo_forecast_filter.itemData(index)
-        )
-        self.ticker_service.set_forecast_filter(self._forecast_filter)
-        self._apply_forecast_filter()
+
 
     def _apply_forecast_filter(self) -> None:
         """Applies the forecast filter to the sidebar list and the chart overlay."""
@@ -1437,12 +1494,7 @@ class MainWindow(QMainWindow):
             )
 
     def _on_history_direction_filter_changed(self, direction: str) -> None:
-        key = normalize_forecast_filter(
-            DirectionalBias.from_str(direction).value.lower() if direction else "off"
-        )
-        index = self.combo_forecast_filter.findData(key)
-        if index >= 0 and index != self.combo_forecast_filter.currentIndex():
-            self.combo_forecast_filter.setCurrentIndex(index)
+        pass
 
     def _regenerate_forecast(self) -> None:
         """Generates a fresh forecast for the selected ticker and horizon."""
@@ -1470,6 +1522,7 @@ class MainWindow(QMainWindow):
         self.chart_widget.set_forecast_overlay_visible(
             forecast_matches_filter(forecast, self._forecast_filter)
         )
+        self._apply_forecast_filter_extension()
         self._update_forecast_buttons()
         self.status_bar.showMessage(
             f"Forecast generated for {symbol}: {forecast.horizon_label}, "
@@ -1481,6 +1534,7 @@ class MainWindow(QMainWindow):
         self._active_forecast = None
         self._displaying_saved_forecast = False
         self.chart_widget.clear_forecast_overlay()
+        self._apply_forecast_filter_extension()
         self._update_forecast_buttons()
 
     def _on_generate_forecast_clicked(self) -> None:
@@ -1545,6 +1599,7 @@ class MainWindow(QMainWindow):
         self.chart_widget.set_forecast_overlay_visible(
             forecast_matches_filter(forecast, self._forecast_filter)
         )
+        self._apply_forecast_filter_extension()
         self.status_bar.showMessage(
             f"Showing saved forecast #{record.id} for {forecast.ticker} "
             f"({forecast.horizon_label}, generated {forecast.generated_at})."

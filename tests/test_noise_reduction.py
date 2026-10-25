@@ -43,6 +43,8 @@ class TestNoiseReduction(unittest.TestCase):
         self.assertEqual(NoiseReductionAlgorithm.from_str("INVALID"), NoiseReductionAlgorithm.NONE)
 
     def test_enum_from_str_new_algorithms(self):
+        self.assertEqual(NoiseReductionAlgorithm.from_str("Exponential MA (EMA 20)"), NoiseReductionAlgorithm.EMA20)
+        self.assertEqual(NoiseReductionAlgorithm.from_str("EMA 20"), NoiseReductionAlgorithm.EMA20)
         self.assertEqual(NoiseReductionAlgorithm.from_str("Exponential MA (EMA 50)"), NoiseReductionAlgorithm.EMA50)
         self.assertEqual(NoiseReductionAlgorithm.from_str("Exponential MA (EMA 200)"), NoiseReductionAlgorithm.EMA200)
         self.assertEqual(NoiseReductionAlgorithm.from_str("Ramer-Douglas-Peucker (Loose)"), NoiseReductionAlgorithm.RPD1)

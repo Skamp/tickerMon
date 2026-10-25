@@ -430,6 +430,15 @@ class StockChartWidget(QWidget):
         self.overlay_curve.setVisible(False)
         self._overlay_label = "Filtered"
 
+        # Forecast filter extension: dashed continuation of the active filter
+        # into the forecast region, drawn in the same colour as overlay_curve.
+        self._forecast_filter_pen = QPen(QColor("#ffab00"))
+        self._forecast_filter_pen.setWidthF(1.8)
+        self._forecast_filter_pen.setStyle(Qt.DashLine)
+        self._forecast_filter_pen.setCosmetic(True)
+        self._forecast_filter_curve = self.plot_item.plot(pen=self._forecast_filter_pen)
+        self._forecast_filter_curve.setVisible(False)
+
         # ATR volatility band overlay (upper/lower curves + subtle fill)
         self._atr_upper_pen = QPen(QColor(ATR2_COLOR))
         self._atr_upper_pen.setWidthF(1.0)
@@ -600,6 +609,7 @@ class StockChartWidget(QWidget):
         # Cached overlay data
         self._overlay_x: List[float] = []
         self._overlay_y: List[float] = []
+        self._forecast_filter_y: List[float] = []
 
         # Chart-type state and per-mode cached data
         self._chart_type: ChartType = ChartType.LINE
@@ -860,6 +870,9 @@ class StockChartWidget(QWidget):
         if self._overlay_y:
             y_min = min(y_min, min(self._overlay_y))
             y_max = max(y_max, max(self._overlay_y))
+        if self._forecast_filter_y and self._forecast_overlay_visible:
+            y_min = min(y_min, min(self._forecast_filter_y))
+            y_max = max(y_max, max(self._forecast_filter_y))
         atr_upper_valid = [v for v in self._atr_upper if v is not None and math.isfinite(v)]
         atr_lower_valid = [v for v in self._atr_lower if v is not None and math.isfinite(v)]
         if atr_upper_valid:
@@ -907,6 +920,7 @@ class StockChartWidget(QWidget):
 
         if not timestamps or not prices:
             self.clear_overlay()
+            self.clear_forecast_filter_curve()
             return
 
         pen_color = QColor(color)
@@ -923,7 +937,31 @@ class StockChartWidget(QWidget):
         self._overlay_y = []
         self._overlay_label = "Filtered"
         self.overlay_curve.setVisible(False)
+        self.clear_forecast_filter_curve()
         self._fit_view_to_data()
+
+    def set_forecast_filter_curve(
+        self,
+        timestamps: List[float],
+        prices: List[float],
+        color: str = "#ffab00",
+    ) -> None:
+        """Draws a dashed continuation of the active filter into the forecast region."""
+        if not timestamps or not prices:
+            self.clear_forecast_filter_curve()
+            return
+        self._forecast_filter_y = list(prices)
+        self._forecast_filter_pen.setColor(QColor(color))
+        self._forecast_filter_curve.setPen(self._forecast_filter_pen)
+        self._forecast_filter_curve.setData(list(timestamps), list(prices))
+        self._forecast_filter_curve.setVisible(self._forecast_overlay_visible)
+        self._fit_view_to_data()
+
+    def clear_forecast_filter_curve(self) -> None:
+        """Clears and hides the forecast filter extension curve."""
+        self._forecast_filter_y = []
+        self._forecast_filter_curve.setData([], [])
+        self._forecast_filter_curve.setVisible(False)
 
     def set_atr_overlay(
         self,
@@ -1212,6 +1250,8 @@ class StockChartWidget(QWidget):
         self._forecast_reference.setVisible(show)
         anchor_hidden = self._forecast_annotation_anchor == "hidden"
         self._forecast_annotation.setVisible(show and not anchor_hidden)
+        has_filter = bool(self._forecast_filter_y)
+        self._forecast_filter_curve.setVisible(show and has_filter)
         self._fit_view_to_data()
 
     def _currency_symbol_for_forecast(self) -> Optional[str]:
@@ -1235,6 +1275,7 @@ class StockChartWidget(QWidget):
         self._forecast_target.setVisible(False)
         self._forecast_reference.setVisible(False)
         self._forecast_annotation.setVisible(False)
+        self.clear_forecast_filter_curve()
         self._fit_view_to_data()
 
     def _position_forecast_annotation(self, *args) -> None:
