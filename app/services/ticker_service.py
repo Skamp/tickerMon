@@ -148,6 +148,41 @@ class TickerService:
             normalize_forecast_filter(filter_key)
         )
 
+    def get_sort_criterion(self) -> str:
+        """Returns the configured market watch sort criterion, defaulting to 'ticker'."""
+        saved = self.config_manager.load_sort_criterion()
+        if saved in ("ticker", "date", "name", "price", "perf"):
+            return saved
+        if saved in ("date_asc", "date_desc"):
+            return "date"
+        if saved in ("price_asc", "price_desc"):
+            return "price"
+        if saved in ("perf_asc", "perf_desc"):
+            return "perf"
+        return "ticker"
+
+    def set_sort_criterion(self, criterion: str) -> bool:
+        """Persists the market watch sort criterion."""
+        if criterion not in ("ticker", "date", "name", "price", "perf"):
+            criterion = "ticker"
+        return self.config_manager.save_sort_criterion(criterion)
+
+    def get_sort_direction(self) -> str:
+        """Returns the configured market watch sort direction ('asc' or 'desc'), defaulting to 'asc'."""
+        saved = self.config_manager.load_sort_direction()
+        if saved in ("asc", "desc"):
+            return saved
+        legacy = self.config_manager.load_sort_criterion()
+        if legacy in ("date_desc", "price_desc", "perf_desc"):
+            return "desc"
+        return "asc"
+
+    def set_sort_direction(self, direction: str) -> bool:
+        """Persists the market watch sort direction ('asc' or 'desc')."""
+        if direction not in ("asc", "desc"):
+            direction = "asc"
+        return self.config_manager.save_sort_direction(direction)
+
     def get_enabled_filters(self) -> List[str]:
         stored = self.config_manager.load_enabled_filters()
         if stored is None or not isinstance(stored, list):

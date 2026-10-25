@@ -304,6 +304,60 @@ class ConfigManager:
             logger.error(f"Failed to save forecast filter setting: {e}")
             return False
 
+    def load_sort_criterion(self) -> Optional[str]:
+        """Returns the configured market watch sort criterion, or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("sort_criterion")
+        except Exception as e:
+            logger.error(f"Error reading sort criterion setting: {e}")
+            return None
+
+    def save_sort_criterion(self, criterion: str) -> bool:
+        """Saves the selected market watch sort criterion."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["sort_criterion"] = criterion
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved sort criterion setting to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save sort criterion setting: {e}")
+            return False
+
+    def load_sort_direction(self) -> Optional[str]:
+        """Returns the configured market watch sort direction ('asc' or 'desc'), or None when unset."""
+        if not self.config_path.exists():
+            return None
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("sort_direction")
+        except Exception as e:
+            logger.error(f"Error reading sort direction setting: {e}")
+            return None
+
+    def save_sort_direction(self, direction: str) -> bool:
+        """Saves the selected market watch sort direction ('asc' or 'desc')."""
+        try:
+            self._ensure_config_dir()
+            existing = self._read_raw_config()
+            existing["sort_direction"] = direction
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+            logger.info(f"Saved sort direction setting to {self.config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save sort direction setting: {e}")
+            return False
+
     def _read_raw_config(self) -> Dict[str, Any]:
         if not self.config_path.exists():
             return {}

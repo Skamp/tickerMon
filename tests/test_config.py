@@ -337,6 +337,43 @@ class TestConfig(unittest.TestCase):
         reloaded = TickerService(self.config_manager)
         self.assertFalse(reloaded.get_show_structure_labels())
 
+    def test_sort_settings_defaults(self):
+        service = TickerService(self.config_manager)
+        self.assertEqual(service.get_sort_criterion(), "ticker")
+        self.assertEqual(service.get_sort_direction(), "asc")
+
+    def test_sort_settings_roundtrip(self):
+        service = TickerService(self.config_manager)
+        self.assertTrue(service.set_sort_criterion("price"))
+        self.assertTrue(service.set_sort_direction("desc"))
+
+        self.assertEqual(self.config_manager.load_sort_criterion(), "price")
+        self.assertEqual(self.config_manager.load_sort_direction(), "desc")
+
+        reloaded = TickerService(self.config_manager)
+        self.assertEqual(reloaded.get_sort_criterion(), "price")
+        self.assertEqual(reloaded.get_sort_direction(), "desc")
+
+    def test_sort_settings_survive_ticker_save(self):
+        service = TickerService(self.config_manager)
+        service.set_sort_criterion("perf")
+        service.set_sort_direction("desc")
+
+        ok, _ = service.add_ticker("IBM", "International Business Machines")
+        self.assertTrue(ok)
+
+        reloaded = TickerService(self.config_manager)
+        self.assertEqual(reloaded.get_sort_criterion(), "perf")
+        self.assertEqual(reloaded.get_sort_direction(), "desc")
+
+    def test_sort_settings_normalization(self):
+        service = TickerService(self.config_manager)
+        service.set_sort_criterion("invalid_criterion")
+        self.assertEqual(service.get_sort_criterion(), "ticker")
+
+        service.set_sort_direction("invalid_direction")
+        self.assertEqual(service.get_sort_direction(), "asc")
+
 
 if __name__ == "__main__":
     unittest.main()

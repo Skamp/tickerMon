@@ -19,9 +19,22 @@ from app.utils.currency import format_price
 logger = logging.getLogger(__name__)
 
 SORT_BY_TICKER = "ticker"
+SORT_BY_DATE = "date"
+SORT_BY_NAME = "name"
+SORT_BY_PRICE = "price"
+SORT_BY_PERF = "perf"
+
+SORT_CRITERIA = (
+    SORT_BY_TICKER,
+    SORT_BY_DATE,
+    SORT_BY_NAME,
+    SORT_BY_PRICE,
+    SORT_BY_PERF,
+)
+
+# Legacy constants kept for backward compatibility
 SORT_BY_DATE_ASC = "date_asc"
 SORT_BY_DATE_DESC = "date_desc"
-SORT_BY_NAME = "name"
 SORT_BY_PRICE_ASC = "price_asc"
 SORT_BY_PRICE_DESC = "price_desc"
 SORT_BY_PERF_ASC = "perf_asc"
@@ -29,9 +42,12 @@ SORT_BY_PERF_DESC = "perf_desc"
 
 SORT_MODES = (
     SORT_BY_TICKER,
+    SORT_BY_DATE,
+    SORT_BY_NAME,
+    SORT_BY_PRICE,
+    SORT_BY_PERF,
     SORT_BY_DATE_ASC,
     SORT_BY_DATE_DESC,
-    SORT_BY_NAME,
     SORT_BY_PRICE_ASC,
     SORT_BY_PRICE_DESC,
     SORT_BY_PERF_ASC,
@@ -45,25 +61,44 @@ def _numeric_sort_key(value: Optional[float], reverse: bool):
     return (0, -value if reverse else value)
 
 
-def sort_ticker_summaries(summaries: List[TickerSummary], mode: str) -> List[TickerSummary]:
+def sort_ticker_summaries(
+    summaries: List[TickerSummary],
+    criterion: str = SORT_BY_TICKER,
+    ascending: bool = True,
+) -> List[TickerSummary]:
     """Returns summaries ordered by symbol, added date, company name, price or daily performance."""
+    # Backward compatibility for legacy combined mode strings
+    if criterion == SORT_BY_DATE_ASC:
+        criterion, ascending = SORT_BY_DATE, True
+    elif criterion == SORT_BY_DATE_DESC:
+        criterion, ascending = SORT_BY_DATE, False
+    elif criterion == SORT_BY_PRICE_ASC:
+        criterion, ascending = SORT_BY_PRICE, True
+    elif criterion == SORT_BY_PRICE_DESC:
+        criterion, ascending = SORT_BY_PRICE, False
+    elif criterion == SORT_BY_PERF_ASC:
+        criterion, ascending = SORT_BY_PERF, True
+    elif criterion == SORT_BY_PERF_DESC:
+        criterion, ascending = SORT_BY_PERF, False
+
     items = list(summaries)
-    if mode in (SORT_BY_DATE_ASC, SORT_BY_DATE_DESC):
-        items.sort(key=lambda s: s.symbol)
-        items.sort(key=lambda s: s.added_at or "", reverse=(mode == SORT_BY_DATE_DESC))
-    elif mode == SORT_BY_NAME:
-        items.sort(key=lambda s: s.symbol)
-        items.sort(key=lambda s: (s.company_name or "").casefold())
-    elif mode in (SORT_BY_PRICE_ASC, SORT_BY_PRICE_DESC):
-        reverse = mode == SORT_BY_PRICE_DESC
-        items.sort(key=lambda s: s.symbol)
+    reverse = not bool(ascending)
+
+    if criterion == SORT_BY_DATE:
+        items.sort(key=lambda s: s.symbol.upper())
+        items.sort(key=lambda s: s.added_at or "", reverse=reverse)
+    elif criterion == SORT_BY_NAME:
+        items.sort(key=lambda s: s.symbol.upper())
+        items.sort(key=lambda s: (s.company_name or "").casefold(), reverse=reverse)
+    elif criterion == SORT_BY_PRICE:
+        items.sort(key=lambda s: s.symbol.upper())
         items.sort(key=lambda s: _numeric_sort_key(s.current_price, reverse))
-    elif mode in (SORT_BY_PERF_ASC, SORT_BY_PERF_DESC):
-        reverse = mode == SORT_BY_PERF_DESC
-        items.sort(key=lambda s: s.symbol)
+    elif criterion == SORT_BY_PERF:
+        items.sort(key=lambda s: s.symbol.upper())
         items.sort(key=lambda s: _numeric_sort_key(s.pct_change, reverse))
     else:
-        items.sort(key=lambda s: s.symbol)
+        items.sort(key=lambda s: s.symbol.upper(), reverse=reverse)
+
     return items
 
 
@@ -170,16 +205,60 @@ class TickerListWidget(QListWidget):
         self._swing_active: bool = False
         self._forecast_filter_active: bool = False
         self._forecast_symbols: Set[str] = set()
-        self._sort_mode: str = SORT_BY_TICKER
+        self._sort_criterion: str = SORT_BY_TICKER
+        self._sort_ascending: bool = True
 
         self.currentItemChanged.connect(self._on_item_changed)
 
-    def set_sort_mode(self, mode: str) -> None:
-        """Reorders the list using the requested sort mode."""
-        if mode not in SORT_MODES or mode == self._sort_mode:
+    def set_sort(self, criterion: str, ascending: bool = True) -> None:
+        """Reorders the list using the requested sort criterion and direction."""
+        if criterion not in SORT_CRITERIA:
+            criterion = SORT_BY_TICKER
+        asc = bool(ascending)
+        if criterion == self._sort_criterion and asc == self._sort_ascending:
             return
-        self._sort_mode = mode
+        self._sort_criterion = criterion
+        self._sort_ascending = asc
         self._repopulate(self.get_selected_symbol())
+
+    def set_sort_mode(self, mode: str) -> None:
+        """Legacy helper: reorders using legacy combined mode string."""
+        if mode in (SORT_BY_DATE_DESC, SORT_BY_PRICE_DESC, SORT_BY_PERF_DESC):
+            crit = {
+                SORT_BY_DATE_DESC: SORT_BY_DATE,
+                SORT_BY_PRICE_DESC: SORT_BY_PRICE,
+                SORT_BY_PERF_DESC: SORT_BY_PERF,
+            }.get(mode, SORT_BY_TICKER)
+            self.set_sort(crit, ascending=False)
+        else:
+            crit = {
+                SORT_BY_DATE_ASC: SORT_BY_DATE,
+                SORT_BY_NAME: SORT_BY_NAME,
+                SORT_BY_PRICE_ASC: SORT_BY_PRICE,
+                SORT_BY_PERF_ASC: SORT_BY_PERF,
+            }.get(mode, SORT_BY_TICKER)
+            self.set_sort(crit, ascending=True)
+
+    @property
+    def sort_criterion(self) -> str:
+        return self._sort_criterion
+
+    @property
+    def sort_ascending(self) -> bool:
+        return self._sort_ascending
+
+    @property
+    def _sort_mode(self) -> str:
+        """Legacy property accessor for compatibility."""
+        if self._sort_criterion == SORT_BY_DATE:
+            return SORT_BY_DATE_ASC if self._sort_ascending else SORT_BY_DATE_DESC
+        if self._sort_criterion == SORT_BY_PRICE:
+            return SORT_BY_PRICE_ASC if self._sort_ascending else SORT_BY_PRICE_DESC
+        if self._sort_criterion == SORT_BY_PERF:
+            return SORT_BY_PERF_ASC if self._sort_ascending else SORT_BY_PERF_DESC
+        if self._sort_criterion == SORT_BY_NAME:
+            return SORT_BY_NAME
+        return SORT_BY_TICKER
 
     def update_summaries(
         self,
@@ -221,7 +300,7 @@ class TickerListWidget(QListWidget):
         prev_symbol = self.get_selected_symbol()
         target_sym = select_symbol.upper().strip() if select_symbol else prev_symbol
         filtered = bool(self._active_buckets) or self._swing_active
-        ordered = sort_ticker_summaries(self._summaries, self._sort_mode)
+        ordered = sort_ticker_summaries(self._summaries, self._sort_criterion, self._sort_ascending)
 
         self.blockSignals(True)
         self.clear()

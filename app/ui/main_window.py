@@ -63,13 +63,10 @@ from app.utils.currency import format_price
 from app.ui.ticker_list import (
     TickerListWidget,
     SORT_BY_TICKER,
-    SORT_BY_DATE_ASC,
-    SORT_BY_DATE_DESC,
+    SORT_BY_DATE,
     SORT_BY_NAME,
-    SORT_BY_PRICE_ASC,
-    SORT_BY_PRICE_DESC,
-    SORT_BY_PERF_ASC,
-    SORT_BY_PERF_DESC,
+    SORT_BY_PRICE,
+    SORT_BY_PERF,
 )
 from app.ui.chart_widget import StockChartWidget
 from app.ui.ticker_dialog import TickerAdminDialog
@@ -537,20 +534,96 @@ class MainWindow(QMainWindow):
             }
         """)
         self.combo_sort.addItem("Sort by ticker", userData=SORT_BY_TICKER)
-        self.combo_sort.addItem("Sort by date ascending", userData=SORT_BY_DATE_ASC)
-        self.combo_sort.addItem("Sort by date descending", userData=SORT_BY_DATE_DESC)
+        self.combo_sort.addItem("Sort by date", userData=SORT_BY_DATE)
         self.combo_sort.addItem("Sort by company name", userData=SORT_BY_NAME)
-        self.combo_sort.addItem("Sort by price ascending", userData=SORT_BY_PRICE_ASC)
-        self.combo_sort.addItem("Sort by price descending", userData=SORT_BY_PRICE_DESC)
-        self.combo_sort.addItem("Sort by daily performance ascending", userData=SORT_BY_PERF_ASC)
-        self.combo_sort.addItem("Sort by daily performance descending", userData=SORT_BY_PERF_DESC)
+        self.combo_sort.addItem("Sort by price", userData=SORT_BY_PRICE)
+        self.combo_sort.addItem("Sort by daily performance", userData=SORT_BY_PERF)
         self.combo_sort.setToolTip(
-            "Order of the market watch list.\n"
+            "Sort criterion for the market watch list.\n"
             "Date = the day the ticker was added to the tool.\n"
             "Price / performance = last stored values; unknown values are listed last."
         )
         self.combo_sort.currentIndexChanged.connect(self._on_sort_changed)
         sort_row.addWidget(self.combo_sort, 1)
+
+        # Segmented sort direction buttons: [ ▲ Ascending ] [ ▼ Descending ]
+        direction_container = QWidget(sidebar_frame)
+        direction_layout = QHBoxLayout(direction_container)
+        direction_layout.setContentsMargins(0, 0, 0, 0)
+        direction_layout.setSpacing(0)
+
+        self.sort_direction_group = QButtonGroup(self)
+        self.sort_direction_group.setExclusive(True)
+
+        self.btn_sort_asc = QPushButton("▲ Ascending", direction_container)
+        self.btn_sort_asc.setObjectName("btnSortAsc")
+        self.btn_sort_asc.setCheckable(True)
+        self.btn_sort_asc.setChecked(True)
+        self.btn_sort_asc.setFocusPolicy(Qt.NoFocus)
+        self.btn_sort_asc.setToolTip("Sort in ascending order (A–Z, oldest first, lowest first)")
+        self.btn_sort_asc.setStyleSheet("""
+            QPushButton#btnSortAsc {
+                background-color: #252836;
+                color: #8b90a0;
+                border: 1px solid #323647;
+                border-right: none;
+                border-top-left-radius: 4px;
+                border-bottom-left-radius: 4px;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+                padding: 4px 6px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton#btnSortAsc:hover {
+                background-color: #323647;
+                color: #e1e3ea;
+                border-color: #454b61;
+            }
+            QPushButton#btnSortAsc:checked {
+                background-color: #2962ff;
+                border-color: #2962ff;
+                color: #ffffff;
+            }
+        """)
+
+        self.btn_sort_desc = QPushButton("▼ Descending", direction_container)
+        self.btn_sort_desc.setObjectName("btnSortDesc")
+        self.btn_sort_desc.setCheckable(True)
+        self.btn_sort_desc.setFocusPolicy(Qt.NoFocus)
+        self.btn_sort_desc.setToolTip("Sort in descending order (Z–A, newest first, highest first)")
+        self.btn_sort_desc.setStyleSheet("""
+            QPushButton#btnSortDesc {
+                background-color: #252836;
+                color: #8b90a0;
+                border: 1px solid #323647;
+                border-top-left-radius: 0px;
+                border-bottom-left-radius: 0px;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                padding: 4px 6px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton#btnSortDesc:hover {
+                background-color: #323647;
+                color: #e1e3ea;
+                border-color: #454b61;
+            }
+            QPushButton#btnSortDesc:checked {
+                background-color: #2962ff;
+                border-color: #2962ff;
+                color: #ffffff;
+            }
+        """)
+
+        self.sort_direction_group.addButton(self.btn_sort_asc)
+        self.sort_direction_group.addButton(self.btn_sort_desc)
+        direction_layout.addWidget(self.btn_sort_asc)
+        direction_layout.addWidget(self.btn_sort_desc)
+        self.btn_sort_asc.clicked.connect(self._on_sort_direction_changed)
+        self.btn_sort_desc.clicked.connect(self._on_sort_direction_changed)
+        sort_row.addWidget(direction_container)
 
         sidebar_layout.addLayout(sort_row)
 
@@ -719,6 +792,22 @@ class MainWindow(QMainWindow):
         self._forecast_filter = "off"
         self._apply_forecast_filter()
 
+        saved_criterion = self.ticker_service.get_sort_criterion()
+        saved_direction = self.ticker_service.get_sort_direction()
+        sort_index = self.combo_sort.findData(saved_criterion)
+        self.combo_sort.blockSignals(True)
+        self.combo_sort.setCurrentIndex(sort_index if sort_index >= 0 else 0)
+        self.combo_sort.blockSignals(False)
+
+        self.sort_direction_group.blockSignals(True)
+        if saved_direction == "desc":
+            self.btn_sort_desc.setChecked(True)
+        else:
+            self.btn_sort_asc.setChecked(True)
+        self.sort_direction_group.blockSignals(False)
+
+        self.ticker_list.set_sort(saved_criterion, saved_direction == "asc")
+
         self._refresh_ticker_list(select_symbol=target_ticker)
 
         # Evaluate any pending forecasts against locally stored data (no network).
@@ -759,11 +848,27 @@ class MainWindow(QMainWindow):
         )
 
     def _on_sort_changed(self, index: int) -> None:
-        mode = self.combo_sort.itemData(index)
-        if not mode:
+        criterion = self.combo_sort.itemData(index)
+        if not criterion:
             return
-        self.ticker_list.set_sort_mode(mode)
-        self.status_bar.showMessage(f"Market watch sorted by {self.combo_sort.itemText(index).lower()}.")
+        ascending = self.btn_sort_asc.isChecked()
+        self.ticker_service.set_sort_criterion(criterion)
+        self.ticker_list.set_sort(criterion, ascending)
+        dir_str = "ascending" if ascending else "descending"
+        self.status_bar.showMessage(
+            f"Market watch sorted by {self.combo_sort.itemText(index).lower()} ({dir_str})."
+        )
+
+    def _on_sort_direction_changed(self) -> None:
+        criterion = self.combo_sort.currentData() or SORT_BY_TICKER
+        ascending = self.btn_sort_asc.isChecked()
+        self.ticker_service.set_sort_direction("asc" if ascending else "desc")
+        self.ticker_list.set_sort(criterion, ascending)
+        dir_str = "ascending" if ascending else "descending"
+        crit_text = self.combo_sort.currentText().lower()
+        self.status_bar.showMessage(
+            f"Market watch sorted by {crit_text} ({dir_str})."
+        )
 
     def _on_ticker_selected(self, symbol: str) -> None:
         """Fast offline chart update when selected ticker changes."""

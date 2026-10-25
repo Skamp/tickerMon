@@ -1,5 +1,5 @@
 {
-    "selected_ticker": "LLY",
+    "selected_ticker": "6857.T",
     "selected_range": "6M",
     "tickers": [
         {
@@ -311,7 +311,8 @@
         "Ramer-Douglas-Peucker (Tight)",
         "Double EMA (DEMA)",
         "Triple EMA (TEMA)",
-        "Hull Moving Average (HMA)"
+        "Hull Moving Average (HMA)",
+        "Kalman Filter"
     ],
     "enabled_swing_algorithms": [
         "Min-Max Range (10%)",
@@ -438,13 +439,15 @@
         }
     },
     "swing_range_settings": {
-        "mode": "Duration window (both bounds)",
-        "value": 0,
-        "value_max": 1,
+        "mode": "Maximum duration",
+        "value": 3,
+        "value_max": 0,
         "unit": "weeks"
     },
     "chart_type": "Baseline",
     "show_structure_labels": false,
     "forecast_horizon": "2 Months",
-    "forecast_filter": "off"
+    "forecast_filter": "off",
+    "sort_direction": "asc",
+    "sort_criterion": "ticker"
 }
