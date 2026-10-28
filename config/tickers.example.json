@@ -1,0 +1,110 @@
+{
+    "selected_ticker": "AAPL",
+    "selected_range": "1Y",
+    "tickers": [
+        {
+            "symbol": "AAPL",
+            "name": "Apple Inc.",
+            "enabled": true,
+            "added_at": null
+        },
+        {
+            "symbol": "MSFT",
+            "name": "Microsoft Corporation",
+            "enabled": true,
+            "added_at": null
+        },
+        {
+            "symbol": "NVDA",
+            "name": "NVIDIA Corporation",
+            "enabled": true,
+            "added_at": null
+        },
+        {
+            "symbol": "GOOGL",
+            "name": "Alphabet Inc.",
+            "enabled": true,
+            "added_at": null
+        },
+        {
+            "symbol": "AMZN",
+            "name": "Amazon.com Inc.",
+            "enabled": true,
+            "added_at": null
+        },
+        {
+            "symbol": "TSLA",
+            "name": "Tesla Inc.",
+            "enabled": true,
+            "added_at": null
+        },
+        {
+            "symbol": "META",
+            "name": "Meta Platforms Inc.",
+            "enabled": true,
+            "added_at": null
+        }
+    ],
+    "enabled_filters": [
+        "QuadTree Reduction",
+        "Exponential Moving Average (EMA)",
+        "Exponential MA (EMA 50)",
+        "Exponential MA (EMA 200)",
+        "Exponential MA (EMA 20)",
+        "ATR14 x 2",
+        "ATR14 x 4",
+        "Savitzky-Golay Filter",
+        "Ramer-Douglas-Peucker (RDP)",
+        "Ramer-Douglas-Peucker (Loose)",
+        "Ramer-Douglas-Peucker (Tight)",
+        "Double EMA (DEMA)",
+        "Triple EMA (TEMA)",
+        "Hull Moving Average (HMA)",
+        "Kalman Filter",
+        "Price Deviation % (Fast)",
+        "Price Deviation % (Slow)",
+        "Pass-Band Filter (Ehlers)",
+        "Ehlers Decycler Oscillator",
+        "Ehlers Universal Oscillator",
+        "Ehlers Reflex",
+        "Ehlers Trendflex",
+        "Ehlers Fisher Transform"
+    ],
+    "enabled_swing_algorithms": [
+        "Min-Max Range (10%)",
+        "ZigZag",
+        "Williams Fractals",
+        "Pivot Window (find_peaks)",
+        "Swing Index / ASI (Wilder)",
+        "Parabolic SAR",
+        "SuperTrend",
+        "Chandelier Exit",
+        "Donchian Channels",
+        "Heikin-Ashi",
+        "RSI",
+        "Stochastic",
+        "MACD",
+        "CCI",
+        "Bollinger Bands",
+        "Keltner Channels",
+        "Change-Point (CUSUM / PELT / BOCPD)",
+        "Kalman Filter",
+        "Savitzky-Golay Filter",
+        "Hilbert Transform",
+        "Wavelets",
+        "Hidden Markov Model"
+    ],
+    "swing_algorithm_params": {},
+    "swing_range_settings": {
+        "mode": "Minimum duration",
+        "value": 0,
+        "value_max": 0,
+        "unit": "weeks"
+    },
+    "chart_type": "Line",
+    "show_structure_labels": true,
+    "forecast_horizon": "Off",
+    "forecast_filter": "off",
+    "sort_criterion": "ticker",
+    "sort_direction": "asc"
+}

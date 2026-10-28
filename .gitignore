@@ -115,3 +115,10 @@ desktop.ini
 *.temp
 *.swp
 *.swo
+
+# =========================
+# Application local state
+# =========================
+
+config/tickers.json
+data/
