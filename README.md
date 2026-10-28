@@ -194,6 +194,12 @@ prints the Python/PySide6/Qt/pyqtgraph versions, the screen's device pixel
 ratio and logical/physical DPI, the effective application font, the active
 scaling environment variables and the Windows process DPI awareness state.
 
+On Python 3.13 and newer, a default `"ui_scale": 1.5` is seeded into
+`config/tickers.json` on the first launch where the key is missing, so the
+UI matches the 150%-scaled reference machine. An existing value is never
+overwritten — edit or delete the key to opt out, or use `TICKERMON_SCALE`
+for a per-run override.
+
 Scale/font overrides (highest precedence first):
 
 | Override | Effect |

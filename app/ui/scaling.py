@@ -7,11 +7,12 @@ environment variables when ``QApplication`` is constructed, so everything in
 
 Three entry points (all called from ``main.py``):
 
-* ``apply_scaling_env(config_path)``  - before Qt is imported; pins the DPI
-  scale-factor rounding policy, resolves the optional scale override
-  (``TICKERMON_SCALE`` env var or ``ui_scale`` config value) into
-  ``QT_SCALE_FACTOR``, and best-effort requests Per-Monitor-V2 DPI awareness
-  on Windows.
+* ``apply_scaling_env(config_path)``  - before Qt is imported; seeds the
+  default ``ui_scale`` into the config on Python >= 3.13 (once, never
+  overwriting an existing value), pins the DPI scale-factor rounding policy,
+  resolves the optional scale override (``TICKERMON_SCALE`` env var or
+  ``ui_scale`` config value) into ``QT_SCALE_FACTOR``, and best-effort
+  requests Per-Monitor-V2 DPI awareness on Windows.
 * ``setup_display_scaling(app)``      - after ``QApplication`` exists; sets
   the explicit application-wide default font so text no longer depends on
   whatever system/Qt default each machine resolves to.
@@ -40,6 +41,9 @@ FONT_POINT_ENV_VAR = "TICKERMON_FONT_POINT"
 DEFAULT_FONT_FAMILY = "Segoe UI"
 DEFAULT_FONT_POINT_SIZE = 9.0
 DEFAULT_ROUNDING_POLICY = "PassThrough"
+
+DEFAULT_SEEDED_UI_SCALE = 1.5
+SEED_MIN_PYTHON = (3, 13)
 
 _ROUNDING_ENV_VAR = "QT_SCALE_FACTOR_ROUNDING_POLICY"
 _SCALE_ENV_VAR = "QT_SCALE_FACTOR"
@@ -101,6 +105,68 @@ def _read_scale_from_config(config_path: Optional[Path]) -> Any:
     return None
 
 
+def should_seed_default_scale(version_info: Any) -> bool:
+    """True for Python >= 3.13, where the default ui_scale gets seeded."""
+    try:
+        return tuple(version_info[:2]) >= SEED_MIN_PYTHON
+    except (TypeError, IndexError):
+        return False
+
+
+def seed_default_scale(
+    config_path: Optional[Path], version_info: Any = None
+) -> bool:
+    """Writes ``DEFAULT_SEEDED_UI_SCALE`` into the config (Python >= 3.13).
+
+    Runs before scale resolution so the value already applies on the same
+    launch. Rules: an existing ``ui_scale`` is never overwritten, a corrupt
+    or non-object config is left untouched, and a missing file is created.
+    Returns True only when the config was actually written.
+    """
+    if config_path is None:
+        return False
+    if version_info is None:
+        version_info = sys.version_info
+    if not should_seed_default_scale(version_info):
+        return False
+
+    path = Path(config_path)
+    data = {}  # type: Dict[str, Any]
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Not seeding %s: unreadable config (%s)", CONFIG_SCALE_KEY, exc
+            )
+            return False
+        if not isinstance(loaded, dict):
+            logger.warning(
+                "Not seeding %s: config is not a JSON object", CONFIG_SCALE_KEY
+            )
+            return False
+        if CONFIG_SCALE_KEY in loaded:
+            return False
+        data = loaded
+
+    data[CONFIG_SCALE_KEY] = DEFAULT_SEEDED_UI_SCALE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not write %s: %s", CONFIG_SCALE_KEY, exc)
+        return False
+
+    logger.info(
+        "Seeded %s=%g into %s (Python >= %s)",
+        CONFIG_SCALE_KEY,
+        DEFAULT_SEEDED_UI_SCALE,
+        path,
+        ".".join(str(part) for part in SEED_MIN_PYTHON),
+    )
+    return True
+
+
 def _request_windows_pm_v2() -> bool:
     """Best-effort Per-Monitor-V2 DPI awareness on Windows, before Qt starts.
 
@@ -121,11 +187,14 @@ def _request_windows_pm_v2() -> bool:
 def apply_scaling_env(config_path: Optional[Path] = None) -> Optional[float]:
     """Pins Qt's DPI/scaling policy. MUST run before PySide6 is imported.
 
-    Returns the forced scale factor (QT_SCALE_FACTOR) or None when the OS
-    default should be used.
+    Seeds the default ``ui_scale`` into the config first (Python >= 3.13
+    only), so the seeded value is picked up by the resolution below on the
+    very same launch. Returns the forced scale factor (QT_SCALE_FACTOR) or
+    None when the OS default should be used.
     """
     os.environ.setdefault(_ROUNDING_ENV_VAR, DEFAULT_ROUNDING_POLICY)
     _request_windows_pm_v2()
+    seed_default_scale(config_path)
 
     scale = resolve_scale_factor(
         os.environ.get(SCALE_ENV_VAR),
