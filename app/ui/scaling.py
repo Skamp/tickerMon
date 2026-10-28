@@ -1,0 +1,274 @@
+"""Centralized display-scaling setup for tickerMon.
+
+This module is intentionally importable WITHOUT PySide6/Qt so it can run at
+the very top of ``main.py``, before Qt is loaded. Qt reads its scaling
+environment variables when ``QApplication`` is constructed, so everything in
+``apply_scaling_env()`` must happen before the first Qt import.
+
+Three entry points (all called from ``main.py``):
+
+* ``apply_scaling_env(config_path)``  - before Qt is imported; pins the DPI
+  scale-factor rounding policy, resolves the optional scale override
+  (``TICKERMON_SCALE`` env var or ``ui_scale`` config value) into
+  ``QT_SCALE_FACTOR``, and best-effort requests Per-Monitor-V2 DPI awareness
+  on Windows.
+* ``setup_display_scaling(app)``      - after ``QApplication`` exists; sets
+  the explicit application-wide default font so text no longer depends on
+  whatever system/Qt default each machine resolves to.
+* ``print_diagnostics(app)``          - used by the ``--debug-dpi`` startup
+  flag; prints toolkit versions, screen DPI metrics, the effective font and
+  the process DPI awareness state.
+"""
+
+import ctypes
+import json
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
+
+DEBUG_FLAG = "--debug-dpi"
+
+SCALE_ENV_VAR = "TICKERMON_SCALE"
+CONFIG_SCALE_KEY = "ui_scale"
+FONT_FAMILY_ENV_VAR = "TICKERMON_FONT_FAMILY"
+FONT_POINT_ENV_VAR = "TICKERMON_FONT_POINT"
+
+DEFAULT_FONT_FAMILY = "Segoe UI"
+DEFAULT_FONT_POINT_SIZE = 9.0
+DEFAULT_ROUNDING_POLICY = "PassThrough"
+
+_ROUNDING_ENV_VAR = "QT_SCALE_FACTOR_ROUNDING_POLICY"
+_SCALE_ENV_VAR = "QT_SCALE_FACTOR"
+
+_QT_ENV_VARS = (
+    SCALE_ENV_VAR,
+    _SCALE_ENV_VAR,
+    _ROUNDING_ENV_VAR,
+    "QT_SCREEN_SCALE_FACTORS",
+    "QT_FONT_DPI",
+    "QT_AUTO_SCREEN_SCALE_FACTOR",
+    "QT_ENABLE_HIGHDPI_SCALING",
+    FONT_FAMILY_ENV_VAR,
+    FONT_POINT_ENV_VAR,
+)
+
+
+def parse_positive_float(raw: Any) -> Optional[float]:
+    """Parses a positive, finite float; returns None for anything invalid."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0 or value != value or value in (float("inf"), float("-inf")):
+        return None
+    return value
+
+
+def resolve_scale_factor(env_raw: Any, config_raw: Any) -> Optional[float]:
+    """Returns the scale override with precedence env (TICKERMON_SCALE) > config."""
+    for raw in (env_raw, config_raw):
+        value = parse_positive_float(raw)
+        if value is not None:
+            return value
+    return None
+
+
+def consume_debug_flag(argv: list) -> bool:
+    """Removes ``--debug-dpi`` from argv (so Qt never sees it); True if present."""
+    found = False
+    while DEBUG_FLAG in argv:
+        argv.remove(DEBUG_FLAG)
+        found = True
+    return found
+
+
+def _read_scale_from_config(config_path: Optional[Path]) -> Any:
+    """Reads only the ``ui_scale`` key; tolerates a missing/corrupt file."""
+    if config_path is None:
+        return None
+    try:
+        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict):
+        return data.get(CONFIG_SCALE_KEY)
+    return None
+
+
+def _request_windows_pm_v2() -> bool:
+    """Best-effort Per-Monitor-V2 DPI awareness on Windows, before Qt starts.
+
+    Fails silently when the process awareness was already locked (e.g. by an
+    embedded manifest or a compatibility "override high DPI scaling" setting);
+    ``--debug-dpi`` reports the resulting state either way.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        return bool(
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        )
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def apply_scaling_env(config_path: Optional[Path] = None) -> Optional[float]:
+    """Pins Qt's DPI/scaling policy. MUST run before PySide6 is imported.
+
+    Returns the forced scale factor (QT_SCALE_FACTOR) or None when the OS
+    default should be used.
+    """
+    os.environ.setdefault(_ROUNDING_ENV_VAR, DEFAULT_ROUNDING_POLICY)
+    _request_windows_pm_v2()
+
+    scale = resolve_scale_factor(
+        os.environ.get(SCALE_ENV_VAR),
+        _read_scale_from_config(config_path),
+    )
+    if scale is not None:
+        os.environ[_SCALE_ENV_VAR] = "%g" % scale
+
+    return scale
+
+
+def scaling_summary() -> str:
+    """Short one-line description of the active scaling environment."""
+    parts = [
+        "%s=%s" % (name, os.environ[name])
+        for name in (_ROUNDING_ENV_VAR, _SCALE_ENV_VAR)
+        if name in os.environ
+    ]
+    return ", ".join(parts) if parts else "Qt defaults (no overrides set)"
+
+
+def setup_display_scaling(app: Any) -> Any:
+    """Sets the explicit application-wide default font (after QApplication).
+
+    The font family/size are pinned so text renders identically instead of
+    inheriting each machine's system default. Point sizes still scale with
+    the pinned DPI policy, keeping chart axis text (which uses the app font)
+    and every non-QSS-styled widget consistent with the rest of the UI.
+    """
+    from PySide6.QtGui import QFont
+
+    family = os.environ.get(FONT_FAMILY_ENV_VAR) or DEFAULT_FONT_FAMILY
+    point_size = parse_positive_float(os.environ.get(FONT_POINT_ENV_VAR))
+    if point_size is None:
+        point_size = DEFAULT_FONT_POINT_SIZE
+
+    font = QFont(family)
+    font.setPointSizeF(point_size)
+    app.setFont(font)
+    logger.info(
+        "Display font pinned: %s @ %gpt (DPR-aware)", family, point_size
+    )
+    return font
+
+
+def _windows_dpi_awareness() -> str:
+    """Describes the process DPI awareness state; best-effort and fail-safe."""
+    if sys.platform != "win32":
+        return "n/a (not Windows)"
+    labels = {
+        -1: "DPI_AWARENESS_CONTEXT_UNAWARE",
+        -2: "DPI_AWARENESS_CONTEXT_SYSTEM_AWARE",
+        -3: "DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE (v1)",
+        -4: "DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2",
+        -5: "DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED",
+    }
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        user32.AreDpiAwarenessContextsEqual.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        user32.AreDpiAwarenessContextsEqual.restype = ctypes.c_bool
+        ctx = user32.GetThreadDpiAwarenessContext()
+        if ctx:
+            for value, name in labels.items():
+                if user32.AreDpiAwarenessContextsEqual(ctx, ctypes.c_void_p(value)):
+                    return name
+    except (AttributeError, OSError, ValueError):
+        pass
+    try:
+        awareness = ctypes.c_int()
+        handle = ctypes.windll.kernel32.GetCurrentProcess()
+        hr = ctypes.windll.shcore.GetProcessDpiAwareness(handle, ctypes.byref(awareness))
+        if hr == 0:
+            return {0: "Unaware", 1: "System aware", 2: "Per-monitor aware"}.get(
+                awareness.value, "Unknown (%d)" % awareness.value
+            )
+    except (AttributeError, OSError, ValueError):
+        pass
+    return "Unknown"
+
+
+def _screen_metrics(app: Any) -> Dict[str, Any]:
+    screen = app.primaryScreen()
+    if screen is None:
+        return {"screen": "no primary screen available"}
+    geometry = screen.geometry()
+    return {
+        "screen": screen.name(),
+        "screen geometry": "%dx%d" % (geometry.width(), geometry.height()),
+        "devicePixelRatio": screen.devicePixelRatio(),
+        "logicalDotsPerInch": screen.logicalDotsPerInch(),
+        "physicalDotsPerInch": screen.physicalDotsPerInch(),
+    }
+
+
+def print_diagnostics(app: Any) -> None:
+    """Prints the startup DPI/scaling report triggered by ``--debug-dpi``."""
+    lines = ["", "=== tickerMon DPI / scaling diagnostics (--debug-dpi) ==="]
+
+    lines.append("Python: %s" % sys.version.replace("\n", " "))
+    lines.append("Executable: %s" % sys.executable)
+    lines.append("Platform: %s" % sys.platform)
+
+    try:
+        import PySide6
+
+        lines.append("PySide6: %s" % PySide6.__version__)
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        lines.append("PySide6: unavailable (%s)" % exc)
+    try:
+        from PySide6 import QtCore
+
+        lines.append("Qt runtime: %s" % QtCore.qVersion())
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        lines.append("Qt runtime: unavailable (%s)" % exc)
+    try:
+        import pyqtgraph
+
+        lines.append("pyqtgraph: %s" % pyqtgraph.__version__)
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        lines.append("pyqtgraph: unavailable (%s)" % exc)
+
+    for key, value in sorted(_screen_metrics(app).items()):
+        lines.append("%s: %s" % (key, value))
+
+    font = app.font()
+    metrics = app.fontMetrics()
+    lines.append(
+        "application font: %s @ %gpt (pixelSize=%s, metrics.height=%d)"
+        % (
+            font.family(),
+            font.pointSizeF(),
+            font.pixelSize(),
+            metrics.height(),
+        )
+    )
+    lines.append("widget style: %s" % app.style().objectName())
+    lines.append("Windows DPI awareness: %s" % _windows_dpi_awareness())
+    for name in _QT_ENV_VARS:
+        if name in os.environ:
+            lines.append("env %s=%s" % (name, os.environ[name]))
+    lines.append("===========================================================")
+
+    report = "\n".join(lines)
+    print(report, flush=True)
+    logger.info("DPI diagnostics:\n%s", report)

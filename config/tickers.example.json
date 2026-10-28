@@ -1,6 +1,7 @@
 {
     "selected_ticker": "AAPL",
     "selected_range": "1Y",
+    "ui_scale": 1.0,
     "tickers": [
         {
             "symbol": "AAPL",

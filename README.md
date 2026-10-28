@@ -103,12 +103,13 @@ The application enforces strict separation of concerns through a layered archite
 
 ## ⚙️ Configuration
 
-Ticker configurations and UI preferences are stored in `config/tickers.json`. You can edit this file manually or via the **Manage Tickers** (`Ctrl+T`), **Filters…**, and **Swing…** UI dialogs.
+Ticker configurations and UI preferences are stored in `config/tickers.json`. You can edit this file manually or via the **Manage Tickers** (`Ctrl+T`), **Filters…**, and **Swing…** UI dialogs. A full template with every supported key is provided in `config/tickers.example.json` (the real `config/tickers.json` is git-ignored and auto-created on first run).
 
 | Key | Description |
 | :--- | :--- |
 | `selected_ticker` / `selected_range` | Last selected symbol and time range |
 | `tickers` | Watchlist entries (`symbol`, `name`, `enabled`) |
+| `ui_scale` | Optional UI scale multiplier applied on top of OS display scaling (the `TICKERMON_SCALE` environment variable overrides it) |
 | `enabled_filters` | Noise-reduction algorithms shown in the `Filter:` combo (missing = all enabled, `None (Raw Data)` is always present) |
 | `enabled_swing_algorithms` | Swing algorithms shown in the `Swing:` combo (falls back to `Min-Max Range (10%)` when empty) |
 | `swing_algorithm_params` | Per-algorithm parameters keyed by algorithm name; values are clamped/normalized on load |
@@ -178,6 +179,28 @@ or
 ```
 
 Directories `config/`, `data/`, and `logs/` will be created automatically if they do not exist.
+
+### Display scaling & DPI diagnostics
+
+The DPI policy (Qt scale-factor rounding policy, Windows DPI awareness) and the
+application default font are pinned at startup in `app/ui/scaling.py`, so the
+UI renders at the same relative size across Python/Qt versions and machines.
+
+```bash
+python main.py --debug-dpi
+```
+
+prints the Python/PySide6/Qt/pyqtgraph versions, the screen's device pixel
+ratio and logical/physical DPI, the effective application font, the active
+scaling environment variables and the Windows process DPI awareness state.
+
+Scale/font overrides (highest precedence first):
+
+| Override | Effect |
+| :--- | :--- |
+| `TICKERMON_SCALE` (env) | Global scale multiplier on top of OS display scaling (e.g. `TICKERMON_SCALE=1.25`); overrides `ui_scale` in `config/tickers.json` |
+| `ui_scale` (config) | Same multiplier, persisted per machine in `config/tickers.json` |
+| `TICKERMON_FONT_FAMILY` / `TICKERMON_FONT_POINT` (env) | Override the pinned application font family / point size |
 
 ---
 

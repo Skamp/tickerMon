@@ -2,6 +2,21 @@ import sys
 import logging
 from pathlib import Path
 
+from app.ui.scaling import (
+    apply_scaling_env,
+    consume_debug_flag,
+    print_diagnostics,
+    scaling_summary,
+    setup_display_scaling,
+)
+
+ROOT_DIR = Path(__file__).resolve().parent
+
+# Qt reads its DPI/scale environment variables when QApplication is created,
+# so the scaling policy must be pinned BEFORE PySide6 is imported.
+DEBUG_DPI = consume_debug_flag(sys.argv)
+apply_scaling_env(ROOT_DIR / "config" / "tickers.json")
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon, QPalette, QColor
 from PySide6.QtCore import Qt
@@ -36,13 +51,14 @@ def setup_logging(logs_dir: Path) -> None:
 
 def main() -> None:
     # Root directory definition
-    root_dir = Path(__file__).resolve().parent
+    root_dir = ROOT_DIR
     config_path = root_dir / "config" / "tickers.json"
     db_path = root_dir / "data" / "market_data.db"
     logs_dir = root_dir / "logs"
 
     # Setup Logging
     setup_logging(logs_dir)
+    logging.info("Display scaling policy: %s", scaling_summary())
 
     # Initialize Qt Application
     app = QApplication(sys.argv)
@@ -51,6 +67,11 @@ def main() -> None:
 
     # Apply Dark Theme QSS
     app.setStyleSheet(DARK_THEME_QSS)
+
+    # Pin the application-wide default font before any widget is created
+    setup_display_scaling(app)
+    if DEBUG_DPI:
+        print_diagnostics(app)
 
     # Initialize Core Application Layer
     try:

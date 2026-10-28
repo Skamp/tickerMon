@@ -133,7 +133,12 @@ class TickerItemDelegate(QStyledItemDelegate):
         content_rect = rect.adjusted(padding, padding, -padding, -padding)
 
         # Top row: Symbol (Left) & Price (Right)
-        painter.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        # Family comes from the view/app font (pinned in setup_display_scaling)
+        # so the sidebar matches the rest of the UI on every platform.
+        symbol_font = QFont(option.font)
+        symbol_font.setPointSize(11)
+        symbol_font.setBold(True)
+        painter.setFont(symbol_font)
         painter.setPen(QColor("#ffffff"))
         painter.drawText(
             QRect(content_rect.left(), content_rect.top(), 120, 20),
@@ -151,7 +156,9 @@ class TickerItemDelegate(QStyledItemDelegate):
             )
 
         # Bottom row: Company Name (Left) & Pct Change (Right)
-        painter.setFont(QFont("Segoe UI", 9))
+        name_font = QFont(option.font)
+        name_font.setPointSize(9)
+        painter.setFont(name_font)
         painter.setPen(QColor("#8b90a0"))
         painter.drawText(
             QRect(content_rect.left(), content_rect.top() + 22, 130, 18),
