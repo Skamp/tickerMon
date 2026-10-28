@@ -5,6 +5,7 @@ from pathlib import Path
 from app.ui.scaling import (
     apply_scaling_env,
     consume_debug_flag,
+    log_startup_metrics,
     print_diagnostics,
     scaling_summary,
     setup_display_scaling,
@@ -70,6 +71,8 @@ def main() -> None:
 
     # Pin the application-wide default font before any widget is created
     setup_display_scaling(app)
+    # Screen/DPI metrics go to logs/app.log on every startup
+    log_startup_metrics(app)
     if DEBUG_DPI:
         print_diagnostics(app)
 

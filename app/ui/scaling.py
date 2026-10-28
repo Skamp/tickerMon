@@ -290,6 +290,20 @@ def _screen_metrics(app: Any) -> Dict[str, Any]:
     }
 
 
+def log_startup_metrics(app: Any) -> None:
+    """Logs the key screen/DPI/font metrics on every startup (log only).
+
+    Unlike ``print_diagnostics`` this needs no ``--debug-dpi`` flag and
+    prints no banner - it writes one ``Screen metrics: ...`` line through
+    the regular logging setup (logs/app.log + console).
+    """
+    parts = ["%s=%s" % (key, value) for key, value in _screen_metrics(app).items()]
+    font = app.font()
+    parts.append("font=%s@%gpt" % (font.family(), font.pointSizeF()))
+    parts.append("scaling=%s" % scaling_summary())
+    logger.info("Screen metrics: %s", " | ".join(parts))
+
+
 def print_diagnostics(app: Any) -> None:
     """Prints the startup DPI/scaling report triggered by ``--debug-dpi``."""
     lines = ["", "=== tickerMon DPI / scaling diagnostics (--debug-dpi) ==="]

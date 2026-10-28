@@ -194,6 +194,10 @@ prints the Python/PySide6/Qt/pyqtgraph versions, the screen's device pixel
 ratio and logical/physical DPI, the effective application font, the active
 scaling environment variables and the Windows process DPI awareness state.
 
+Independently of that flag, a single `Screen metrics: …` line (screen,
+geometry, device pixel ratio, DPI, active font and scaling overrides) is
+written to `logs/app.log` and the console on every startup.
+
 On Python 3.13 and newer, a default `"ui_scale": 1.5` is seeded into
 `config/tickers.json` on the first launch where the key is missing, so the
 UI matches the 150%-scaled reference machine. An existing value is never

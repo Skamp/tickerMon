@@ -280,5 +280,73 @@ class TestScalingSummary(unittest.TestCase):
         self.assertIn("1.25", summary)
 
 
+class _StubGeometry:
+    def __init__(self, width, height):
+        self._width = width
+        self._height = height
+
+    def width(self):
+        return self._width
+
+    def height(self):
+        return self._height
+
+
+class _StubScreen:
+    def name(self):
+        return "Stub Screen"
+
+    def geometry(self):
+        return _StubGeometry(2560, 1440)
+
+    def devicePixelRatio(self):
+        return 1.5
+
+    def logicalDotsPerInch(self):
+        return 96.0
+
+    def physicalDotsPerInch(self):
+        return 106.0
+
+
+class _StubFont:
+    def family(self):
+        return "Segoe UI"
+
+    def pointSizeF(self):
+        return 9.0
+
+
+class _StubApp:
+    def __init__(self, screen):
+        self._screen = screen
+
+    def primaryScreen(self):
+        return self._screen
+
+    def font(self):
+        return _StubFont()
+
+
+class TestLogStartupMetrics(unittest.TestCase):
+    def test_logs_screen_metrics_line(self):
+        with self.assertLogs("app.ui.scaling", level="INFO") as logs:
+            scaling.log_startup_metrics(_StubApp(_StubScreen()))
+        line = logs.output[0]
+        self.assertIn("Screen metrics:", line)
+        self.assertIn("screen=Stub Screen", line)
+        self.assertIn("screen geometry=2560x1440", line)
+        self.assertIn("devicePixelRatio=1.5", line)
+        self.assertIn("logicalDotsPerInch=96.0", line)
+        self.assertIn("physicalDotsPerInch=106.0", line)
+        self.assertIn("font=Segoe UI@9pt", line)
+        self.assertIn("scaling=", line)
+
+    def test_falls_back_without_primary_screen(self):
+        with self.assertLogs("app.ui.scaling", level="INFO") as logs:
+            scaling.log_startup_metrics(_StubApp(None))
+        self.assertIn("no primary screen available", logs.output[0])
+
+
 if __name__ == "__main__":
     unittest.main()
