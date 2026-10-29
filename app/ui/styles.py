@@ -3,8 +3,7 @@ DARK_THEME_QSS = """
 QMainWindow, QDialog {
     background-color: #121318;
     color: #e1e3ea;
-    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
-    font-size: 13px;
+    font-size: 9.75pt;
 }
 
 QWidget {
@@ -17,6 +16,10 @@ QFrame#sidebarFrame, QFrame#cardFrame, QFrame#headerFrame {
     background-color: #1a1c24;
     border-radius: 6px;
     border: 1px solid #282b36;
+}
+
+QWidget#toolbarSection {
+    background: transparent;
 }
 
 /* Toolbars */
@@ -112,36 +115,36 @@ QLabel {
 }
 
 QLabel#titleLabel {
-    font-size: 20px;
+    font-size: 15pt;
     font-weight: bold;
     color: #ffffff;
 }
 
 QLabel#subtitleLabel {
-    font-size: 12px;
+    font-size: 9pt;
     color: #8b90a0;
 }
 
 QLabel#priceLabel {
-    font-size: 26px;
+    font-size: 19.5pt;
     font-weight: bold;
     color: #ffffff;
 }
 
 QLabel#changePositive {
-    font-size: 14px;
+    font-size: 10.5pt;
     font-weight: bold;
     color: #00e676;
 }
 
 QLabel#changeNegative {
-    font-size: 14px;
+    font-size: 10.5pt;
     font-weight: bold;
     color: #ff5252;
 }
 
 QLabel#changeNeutral {
-    font-size: 14px;
+    font-size: 10.5pt;
     font-weight: bold;
     color: #8b90a0;
 }

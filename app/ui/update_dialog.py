@@ -35,7 +35,7 @@ class UpdateProgressDialog(QDialog):
 
         # Header Title
         self.title_label = QLabel("Syncing tickers with Yahoo Finance...", self)
-        self.title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff;")
+        self.title_label.setStyleSheet("font-size: 10.5pt; font-weight: bold; color: #ffffff;")
         self.layout.addWidget(self.title_label)
 
         # Progress Bar

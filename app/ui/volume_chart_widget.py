@@ -110,7 +110,7 @@ def _legend_label(color: str, text: str, parent: QWidget) -> QLabel:
         f'<span style="color: {color};">■</span> '
         f'<span style="color: #8b90a0;">{text}</span>'
     )
-    label.setStyleSheet("font-size: 11px;")
+    label.setStyleSheet("font-size: 8.25pt;")
     return label
 
 
@@ -142,7 +142,7 @@ class VolumeChartWidget(QWidget):
         header.setSpacing(12)
         title = QLabel("VOLUME", self)
         title.setStyleSheet(
-            "font-size: 11px; font-weight: bold; color: #8b90a0; letter-spacing: 1px;"
+            "font-size: 8.25pt; font-weight: bold; color: #8b90a0; letter-spacing: 1px;"
         )
         header.addWidget(title)
         header.addWidget(_legend_label(BUY_COLOR, "Buying pressure", self))

@@ -109,7 +109,6 @@ Ticker configurations and UI preferences are stored in `config/tickers.json`. Yo
 | :--- | :--- |
 | `selected_ticker` / `selected_range` | Last selected symbol and time range |
 | `tickers` | Watchlist entries (`symbol`, `name`, `enabled`) |
-| `ui_scale` | Optional UI scale multiplier applied on top of OS display scaling (the `TICKERMON_SCALE` environment variable overrides it) |
 | `enabled_filters` | Noise-reduction algorithms shown in the `Filter:` combo (missing = all enabled, `None (Raw Data)` is always present) |
 | `enabled_swing_algorithms` | Swing algorithms shown in the `Swing:` combo (falls back to `Min-Max Range (10%)` when empty) |
 | `swing_algorithm_params` | Per-algorithm parameters keyed by algorithm name; values are clamped/normalized on load |
@@ -190,26 +189,27 @@ UI renders at the same relative size across Python/Qt versions and machines.
 python main.py --debug-dpi
 ```
 
-prints the Python/PySide6/Qt/pyqtgraph versions, the screen's device pixel
-ratio and logical/physical DPI, the effective application font, the active
-scaling environment variables and the Windows process DPI awareness state.
+prints the Python/PySide6/Qt/pyqtgraph versions, the operating system, the
+screen's device pixel ratio and logical/physical DPI, the effective
+application font (requested family and the family actually resolved by the
+platform), the active scaling environment variables and the Windows process
+DPI awareness state.
 
 Independently of that flag, a single `Screen metrics: …` line (screen,
-geometry, device pixel ratio, DPI, active font and scaling overrides) is
-written to `logs/app.log` and the console on every startup.
+geometry, device pixel ratio, DPI, active font, effective scale factor and
+scaling overrides) is written to `logs/app.log` and the console on every
+startup.
 
-On Python 3.13 and newer, a default `"ui_scale": 1.5` is seeded into
-`config/tickers.json` on the first launch where the key is missing, so the
-UI matches the 150%-scaled reference machine. An existing value is never
-overwritten — edit or delete the key to opt out, or use `TICKERMON_SCALE`
-for a per-run override.
+The default font family is resolved against the fonts actually installed on
+the machine (candidates: `Segoe UI`, `Noto Sans`, `DejaVu Sans`, `Ubuntu`).
+A legacy `ui_scale` value in `config/tickers.json` is reported at startup and
+ignored — every Python/Qt build follows the same scaling policy.
 
 Scale/font overrides (highest precedence first):
 
 | Override | Effect |
 | :--- | :--- |
-| `TICKERMON_SCALE` (env) | Global scale multiplier on top of OS display scaling (e.g. `TICKERMON_SCALE=1.25`); overrides `ui_scale` in `config/tickers.json` |
-| `ui_scale` (config) | Same multiplier, persisted per machine in `config/tickers.json` |
+| `TICKERMON_SCALE` (env) | Global scale multiplier on top of OS display scaling (e.g. `TICKERMON_SCALE=1.25`) |
 | `TICKERMON_FONT_FAMILY` / `TICKERMON_FONT_POINT` (env) | Override the pinned application font family / point size |
 
 ---

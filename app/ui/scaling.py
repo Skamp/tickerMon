@@ -7,27 +7,28 @@ environment variables when ``QApplication`` is constructed, so everything in
 
 Three entry points (all called from ``main.py``):
 
-* ``apply_scaling_env(config_path)``  - before Qt is imported; seeds the
-  default ``ui_scale`` into the config on Python >= 3.13 (once, never
-  overwriting an existing value), pins the DPI scale-factor rounding policy,
-  resolves the optional scale override (``TICKERMON_SCALE`` env var or
-  ``ui_scale`` config value) into ``QT_SCALE_FACTOR``, and best-effort
-  requests Per-Monitor-V2 DPI awareness on Windows.
-* ``setup_display_scaling(app)``      - after ``QApplication`` exists; sets
+* ``apply_scaling_env(config_path)``  - before Qt is imported; pins the DPI
+  scale-factor rounding policy, resolves the optional scale override
+  (``TICKERMON_SCALE`` env var) into ``QT_SCALE_FACTOR``, best-effort requests
+  Per-Monitor-V2 DPI awareness on Windows, and reports (but never applies) a
+  legacy ``ui_scale`` config value so every Python build follows one policy.
+* ``setup_display_scaling(app)``      - after ``QApplication`` exists; pins
   the explicit application-wide default font so text no longer depends on
-  whatever system/Qt default each machine resolves to.
+  whatever system/Qt default each machine resolves to. The family is resolved
+  against the fonts actually installed on the machine.
 * ``print_diagnostics(app)``          - used by the ``--debug-dpi`` startup
-  flag; prints toolkit versions, screen DPI metrics, the effective font and
-  the process DPI awareness state.
+  flag; prints toolkit versions, operating system, screen DPI metrics, the
+  effective font and the process DPI awareness state.
 """
 
 import ctypes
 import json
 import logging
 import os
+import platform
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,9 @@ CONFIG_SCALE_KEY = "ui_scale"
 FONT_FAMILY_ENV_VAR = "TICKERMON_FONT_FAMILY"
 FONT_POINT_ENV_VAR = "TICKERMON_FONT_POINT"
 
-DEFAULT_FONT_FAMILY = "Segoe UI"
+FONT_FAMILY_CANDIDATES = ("Segoe UI", "Noto Sans", "DejaVu Sans", "Ubuntu")
 DEFAULT_FONT_POINT_SIZE = 9.0
 DEFAULT_ROUNDING_POLICY = "PassThrough"
-
-DEFAULT_SEEDED_UI_SCALE = 1.5
-SEED_MIN_PYTHON = (3, 13)
 
 _ROUNDING_ENV_VAR = "QT_SCALE_FACTOR_ROUNDING_POLICY"
 _SCALE_ENV_VAR = "QT_SCALE_FACTOR"
@@ -105,66 +103,16 @@ def _read_scale_from_config(config_path: Optional[Path]) -> Any:
     return None
 
 
-def should_seed_default_scale(version_info: Any) -> bool:
-    """True for Python >= 3.13, where the default ui_scale gets seeded."""
-    try:
-        return tuple(version_info[:2]) >= SEED_MIN_PYTHON
-    except (TypeError, IndexError):
-        return False
-
-
-def seed_default_scale(
-    config_path: Optional[Path], version_info: Any = None
-) -> bool:
-    """Writes ``DEFAULT_SEEDED_UI_SCALE`` into the config (Python >= 3.13).
-
-    Runs before scale resolution so the value already applies on the same
-    launch. Rules: an existing ``ui_scale`` is never overwritten, a corrupt
-    or non-object config is left untouched, and a missing file is created.
-    Returns True only when the config was actually written.
-    """
-    if config_path is None:
-        return False
-    if version_info is None:
-        version_info = sys.version_info
-    if not should_seed_default_scale(version_info):
-        return False
-
-    path = Path(config_path)
-    data = {}  # type: Dict[str, Any]
-    if path.exists():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            logger.warning(
-                "Not seeding %s: unreadable config (%s)", CONFIG_SCALE_KEY, exc
-            )
-            return False
-        if not isinstance(loaded, dict):
-            logger.warning(
-                "Not seeding %s: config is not a JSON object", CONFIG_SCALE_KEY
-            )
-            return False
-        if CONFIG_SCALE_KEY in loaded:
-            return False
-        data = loaded
-
-    data[CONFIG_SCALE_KEY] = DEFAULT_SEEDED_UI_SCALE
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=4), encoding="utf-8")
-    except OSError as exc:
-        logger.warning("Could not write %s: %s", CONFIG_SCALE_KEY, exc)
-        return False
-
-    logger.info(
-        "Seeded %s=%g into %s (Python >= %s)",
-        CONFIG_SCALE_KEY,
-        DEFAULT_SEEDED_UI_SCALE,
-        path,
-        ".".join(str(part) for part in SEED_MIN_PYTHON),
-    )
-    return True
+def resolve_font_family(
+    available_families: Iterable[str],
+    candidates: Iterable[str] = FONT_FAMILY_CANDIDATES,
+) -> Optional[str]:
+    """Returns the first preferred font family that is installed, else None."""
+    installed = {name.lower() for name in available_families}
+    for family in candidates:
+        if family.lower() in installed:
+            return family
+    return None
 
 
 def _request_windows_pm_v2() -> bool:
@@ -187,19 +135,24 @@ def _request_windows_pm_v2() -> bool:
 def apply_scaling_env(config_path: Optional[Path] = None) -> Optional[float]:
     """Pins Qt's DPI/scaling policy. MUST run before PySide6 is imported.
 
-    Seeds the default ``ui_scale`` into the config first (Python >= 3.13
-    only), so the seeded value is picked up by the resolution below on the
-    very same launch. Returns the forced scale factor (QT_SCALE_FACTOR) or
-    None when the OS default should be used.
+    Only the ``TICKERMON_SCALE`` environment variable overrides the OS scale;
+    a legacy ``ui_scale`` value in the config file is reported and ignored so
+    every Python/Qt build follows the same policy. Returns the forced scale
+    factor (QT_SCALE_FACTOR) or None when the OS default should be used.
     """
     os.environ.setdefault(_ROUNDING_ENV_VAR, DEFAULT_ROUNDING_POLICY)
     _request_windows_pm_v2()
-    seed_default_scale(config_path)
 
-    scale = resolve_scale_factor(
-        os.environ.get(SCALE_ENV_VAR),
-        _read_scale_from_config(config_path),
-    )
+    if config_path is not None and parse_positive_float(
+        _read_scale_from_config(config_path)
+    ) is not None:
+        logger.info(
+            "Ignoring ui_scale in %s; set %s to override the scale explicitly.",
+            config_path,
+            SCALE_ENV_VAR,
+        )
+
+    scale = resolve_scale_factor(os.environ.get(SCALE_ENV_VAR), None)
     if scale is not None:
         os.environ[_SCALE_ENV_VAR] = "%g" % scale
 
@@ -220,22 +173,41 @@ def setup_display_scaling(app: Any) -> Any:
     """Sets the explicit application-wide default font (after QApplication).
 
     The font family/size are pinned so text renders identically instead of
-    inheriting each machine's system default. Point sizes still scale with
-    the pinned DPI policy, keeping chart axis text (which uses the app font)
-    and every non-QSS-styled widget consistent with the rest of the UI.
+    inheriting each machine's system default. The family is resolved against
+    the fonts actually installed, so Linux gets a real family instead of an
+    undefined fallback behind the Windows-only ``Segoe UI`` name. Point sizes
+    still scale with the pinned DPI policy, keeping chart axis text (which
+    uses the app font) and every non-QSS-styled widget consistent with the
+    rest of the UI.
     """
-    from PySide6.QtGui import QFont
+    from PySide6.QtGui import QFont, QFontDatabase
 
-    family = os.environ.get(FONT_FAMILY_ENV_VAR) or DEFAULT_FONT_FAMILY
+    requested = os.environ.get(FONT_FAMILY_ENV_VAR)
+    if requested:
+        family = requested
+        source = "env"
+    else:
+        try:
+            installed = list(QFontDatabase.families())
+        except AttributeError:  # pragma: no cover - very old PySide6
+            installed = list(QFontDatabase().families())
+        family = resolve_font_family(installed)
+        source = "installed" if family else "system default"
+        if family is None:
+            family = QFont().defaultFamily() or None
+
     point_size = parse_positive_float(os.environ.get(FONT_POINT_ENV_VAR))
     if point_size is None:
         point_size = DEFAULT_FONT_POINT_SIZE
 
-    font = QFont(family)
+    font = QFont(family) if family else QFont()
     font.setPointSizeF(point_size)
     app.setFont(font)
     logger.info(
-        "Display font pinned: %s @ %gpt (DPR-aware)", family, point_size
+        "Display font pinned: %s @ %gpt (resolved from %s)",
+        font.family(),
+        point_size,
+        source,
     )
     return font
 
@@ -301,6 +273,7 @@ def log_startup_metrics(app: Any) -> None:
     font = app.font()
     parts.append("font=%s@%gpt" % (font.family(), font.pointSizeF()))
     parts.append("scaling=%s" % scaling_summary())
+    parts.append("qt_scale=%s" % os.environ.get(_SCALE_ENV_VAR, "<unset>"))
     logger.info("Screen metrics: %s", " | ".join(parts))
 
 
@@ -311,6 +284,7 @@ def print_diagnostics(app: Any) -> None:
     lines.append("Python: %s" % sys.version.replace("\n", " "))
     lines.append("Executable: %s" % sys.executable)
     lines.append("Platform: %s" % sys.platform)
+    lines.append("Operating system: %s" % platform.platform())
 
     try:
         import PySide6
@@ -336,17 +310,27 @@ def print_diagnostics(app: Any) -> None:
 
     font = app.font()
     metrics = app.fontMetrics()
+    try:
+        from PySide6.QtGui import QFontInfo
+
+        resolved_family = QFontInfo(font).family()
+    except Exception:  # pragma: no cover - diagnostics only
+        resolved_family = font.family()
     lines.append(
-        "application font: %s @ %gpt (pixelSize=%s, metrics.height=%d)"
+        "application font: %s @ %gpt (resolved=%s, pixelSize=%s, metrics.height=%d)"
         % (
             font.family(),
             font.pointSizeF(),
+            resolved_family,
             font.pixelSize(),
             metrics.height(),
         )
     )
     lines.append("widget style: %s" % app.style().objectName())
     lines.append("Windows DPI awareness: %s" % _windows_dpi_awareness())
+    lines.append(
+        "QT_SCALE_FACTOR: %s" % os.environ.get(_SCALE_ENV_VAR, "<unset / OS default>")
+    )
     for name in _QT_ENV_VARS:
         if name in os.environ:
             lines.append("env %s=%s" % (name, os.environ[name]))

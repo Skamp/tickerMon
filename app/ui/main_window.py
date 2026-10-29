@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QVBoxLayout,
+    QGridLayout,
     QPushButton,
     QLabel,
     QFrame,
@@ -144,31 +145,44 @@ class MainWindow(QMainWindow):
         # ---------------------------------------------------------------------
         toolbar_frame = QFrame(self)
         toolbar_frame.setObjectName("headerFrame")
-        toolbar_layout = QHBoxLayout(toolbar_frame)
+        toolbar_frame.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+        self._toolbar_frame = toolbar_frame
+        toolbar_layout = QVBoxLayout(toolbar_frame)
         toolbar_layout.setContentsMargins(10, 8, 10, 8)
-        toolbar_layout.setSpacing(12)
+        toolbar_layout.setSpacing(8)
 
-        # Update Buttons (stacked: all tickers over new tickers)
-        update_button_stack = QVBoxLayout()
-        update_button_stack.setSpacing(4)
+        self._toolbar_row_a = QHBoxLayout()
+        self._toolbar_row_a.setSpacing(12)
+        self._toolbar_row_b = QHBoxLayout()
+        self._toolbar_row_b.setSpacing(12)
+        toolbar_layout.addLayout(self._toolbar_row_a)
+        toolbar_layout.addLayout(self._toolbar_row_b)
+        self._toolbar_stacked = False
 
-        self.btn_update = QPushButton("Update all tickers", toolbar_frame)
+        # S1: Update buttons (stacked: all tickers over new tickers)
+        self._toolbar_section_updates = QWidget(toolbar_frame)
+        self._toolbar_section_updates.setObjectName("toolbarSection")
+        updates_layout = QVBoxLayout(self._toolbar_section_updates)
+        updates_layout.setContentsMargins(0, 0, 0, 0)
+        updates_layout.setSpacing(4)
+
+        self.btn_update = QPushButton("Update all tickers", self._toolbar_section_updates)
         self.btn_update.setObjectName("updateButton")
         self.btn_update.setToolTip("Sync latest price data from Yahoo Finance (Ctrl+U)")
         self.btn_update.clicked.connect(self._on_update_clicked)
-        update_button_stack.addWidget(self.btn_update)
+        updates_layout.addWidget(self.btn_update)
 
-        self.btn_update_new = QPushButton("Update new tickers", toolbar_frame)
+        self.btn_update_new = QPushButton("Update new tickers", self._toolbar_section_updates)
         self.btn_update_new.setObjectName("updateButton")
         self.btn_update_new.setToolTip("Download data only for tickers with no stored prices")
         self.btn_update_new.clicked.connect(self._on_update_new_clicked)
-        update_button_stack.addWidget(self.btn_update_new)
+        updates_layout.addWidget(self.btn_update_new)
 
-        toolbar_layout.addLayout(update_button_stack)
+        self._toolbar_row_a.addWidget(self._toolbar_section_updates)
 
-        toolbar_layout.addSpacing(15)
-
-        # Noise Reduction + Swing Detection ComboBoxes (Left of Time Ranges)
+        # S2: Filter / Swing / Duration controls in a shared grid
         combo_style = """
             QComboBox {
                 background-color: #252836;
@@ -189,82 +203,67 @@ class MainWindow(QMainWindow):
             }
         """
 
-        self.filter_stack_widget = QWidget(toolbar_frame)
-        self.filter_stack_widget.setSizePolicy(
+        self._toolbar_section_filter = QWidget(toolbar_frame)
+        self._toolbar_section_filter.setObjectName("toolbarSection")
+        self._toolbar_section_filter.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
         )
-        filter_stack = QVBoxLayout(self.filter_stack_widget)
-        filter_stack.setContentsMargins(0, 0, 0, 0)
-        filter_stack.setSpacing(4)
+        filter_grid = QGridLayout(self._toolbar_section_filter)
+        filter_grid.setContentsMargins(0, 0, 0, 0)
+        filter_grid.setHorizontalSpacing(8)
+        filter_grid.setVerticalSpacing(4)
+        vcenter = Qt.AlignmentFlag.AlignVCenter
 
-        noise_row = QHBoxLayout()
-        noise_row.setSpacing(8)
-
-        noise_label = QLabel("Filter:", toolbar_frame)
+        noise_label = QLabel("Filter:", self._toolbar_section_filter)
         noise_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
-        noise_row.addWidget(noise_label)
+        filter_grid.addWidget(noise_label, 0, 0, alignment=vcenter)
 
-        self.combo_noise = QComboBox(toolbar_frame)
+        self.combo_noise = QComboBox(self._toolbar_section_filter)
         self.combo_noise.setToolTip("Apply noise reduction algorithm overlay to price graph")
         self.combo_noise.setStyleSheet(combo_style)
 
         self._rebuild_noise_combo()
         self.combo_noise.currentIndexChanged.connect(self._on_noise_algorithm_changed)
-        noise_row.addWidget(self.combo_noise)
+        filter_grid.addWidget(self.combo_noise, 0, 1, alignment=vcenter)
 
-        self.btn_filter_settings = QPushButton("Filters…", toolbar_frame)
+        self.btn_filter_settings = QPushButton("Filters…", self._toolbar_section_filter)
         self.btn_filter_settings.setToolTip("Choose which filters appear in the Filter list")
         self.btn_filter_settings.clicked.connect(self._on_open_filter_settings)
-        noise_row.addWidget(self.btn_filter_settings)
-        filter_stack.addLayout(noise_row)
+        filter_grid.addWidget(self.btn_filter_settings, 0, 2, alignment=vcenter)
 
-        swing_row = QHBoxLayout()
-        swing_row.setSpacing(8)
-
-        swing_label = QLabel("Swing:", toolbar_frame)
+        swing_label = QLabel("Swing:", self._toolbar_section_filter)
         swing_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
-        swing_row.addWidget(swing_label)
+        filter_grid.addWidget(swing_label, 1, 0, alignment=vcenter)
 
-        self.combo_swing = QComboBox(toolbar_frame)
+        self.combo_swing = QComboBox(self._toolbar_section_filter)
         self.combo_swing.setToolTip("Algorithm used to detect the swing bucket")
         self.combo_swing.setStyleSheet(combo_style)
 
         self._rebuild_swing_combo()
         self.combo_swing.currentIndexChanged.connect(self._on_swing_algorithm_changed)
-        swing_row.addWidget(self.combo_swing)
+        filter_grid.addWidget(self.combo_swing, 1, 1, alignment=vcenter)
 
-        self.btn_swing_settings = QPushButton("Swing…", toolbar_frame)
+        swing_trailing = QHBoxLayout()
+        swing_trailing.setSpacing(8)
+        self.btn_swing_settings = QPushButton("Swing…", self._toolbar_section_filter)
         self.btn_swing_settings.setToolTip("Enable swing algorithms and configure their parameters")
         self.btn_swing_settings.clicked.connect(self._on_open_swing_settings)
-        swing_row.addWidget(self.btn_swing_settings)
+        swing_trailing.addWidget(self.btn_swing_settings)
 
-        self.chk_structure_labels = QCheckBox("Structure labels", toolbar_frame)
+        self.chk_structure_labels = QCheckBox("Structure labels", self._toolbar_section_filter)
         self.chk_structure_labels.setToolTip(
             "Show market structure labels (HH / HL / LH / LL / M)\non confirmed swing pivots."
         )
         self.chk_structure_labels.setChecked(True)
         self.chk_structure_labels.toggled.connect(self._on_structure_labels_toggled)
-        swing_row.addWidget(self.chk_structure_labels)
+        swing_trailing.addWidget(self.chk_structure_labels)
+        filter_grid.addLayout(swing_trailing, 1, 2, alignment=vcenter)
 
-        filter_stack.addLayout(swing_row)
-
-        swing_range_row = QHBoxLayout()
-        swing_range_row.setSpacing(8)
-
-        duration_label = QLabel("Duration:", toolbar_frame)
+        duration_label = QLabel("Duration:", self._toolbar_section_filter)
         duration_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
-        swing_range_row.addWidget(duration_label)
+        filter_grid.addWidget(duration_label, 2, 0, alignment=vcenter)
 
-        row_label_width = max(
-            noise_label.sizeHint().width(),
-            swing_label.sizeHint().width(),
-            duration_label.sizeHint().width(),
-        )
-        noise_label.setFixedWidth(row_label_width)
-        swing_label.setFixedWidth(row_label_width)
-        duration_label.setFixedWidth(row_label_width)
-
-        self.combo_swing_range_mode = QComboBox(toolbar_frame)
+        self.combo_swing_range_mode = QComboBox(self._toolbar_section_filter)
         for swing_range_mode in SwingRangeMode:
             self.combo_swing_range_mode.addItem(swing_range_mode.value, userData=swing_range_mode.value)
         self.combo_swing_range_mode.setStyleSheet(combo_style)
@@ -274,42 +273,98 @@ class MainWindow(QMainWindow):
             "Lookback window: only detect swings in the last X\n"
             "Duration window: keep swings between X and Y"
         )
-        swing_range_row.addWidget(self.combo_swing_range_mode)
+        filter_grid.addWidget(self.combo_swing_range_mode, 2, 1, alignment=vcenter)
 
-        self.spin_swing_range = QSpinBox(toolbar_frame)
+        duration_trailing = QHBoxLayout()
+        duration_trailing.setSpacing(8)
+        self.spin_swing_range = QSpinBox(self._toolbar_section_filter)
         self.spin_swing_range.setRange(0, 520)
-        self.spin_swing_range.setFixedWidth(66)
+        self.spin_swing_range.setMinimumWidth(66)
+        self.spin_swing_range.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
         self.spin_swing_range.setSpecialValueText("Off")
         self.spin_swing_range.setToolTip(
             "Detect only swings inside this time range (weeks).\n"
             "0 = Off (no range filter)."
         )
-        swing_range_row.addWidget(self.spin_swing_range)
+        duration_trailing.addWidget(self.spin_swing_range)
 
-        self.lbl_swing_range_dash = QLabel("-", toolbar_frame)
+        self.lbl_swing_range_dash = QLabel("-", self._toolbar_section_filter)
         self.lbl_swing_range_dash.setStyleSheet("color: #8b90a0;")
-        swing_range_row.addWidget(self.lbl_swing_range_dash)
+        duration_trailing.addWidget(self.lbl_swing_range_dash)
 
-        self.spin_swing_range_max = QSpinBox(toolbar_frame)
+        self.spin_swing_range_max = QSpinBox(self._toolbar_section_filter)
         self.spin_swing_range_max.setRange(1, 520)
-        self.spin_swing_range_max.setFixedWidth(66)
+        self.spin_swing_range_max.setMinimumWidth(66)
+        self.spin_swing_range_max.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
         self.spin_swing_range_max.setToolTip("Upper bound of the swing duration window.")
-        swing_range_row.addWidget(self.spin_swing_range_max)
+        duration_trailing.addWidget(self.spin_swing_range_max)
 
-        self.lbl_swing_range_unit = QLabel("weeks", toolbar_frame)
+        self.lbl_swing_range_unit = QLabel("weeks", self._toolbar_section_filter)
         self.lbl_swing_range_unit.setStyleSheet("color: #8b90a0;")
-        swing_range_row.addWidget(self.lbl_swing_range_unit)
+        duration_trailing.addWidget(self.lbl_swing_range_unit)
+        filter_grid.addLayout(duration_trailing, 2, 2, alignment=vcenter)
 
-        filter_stack.addLayout(swing_range_row)
+        self._load_swing_range_settings()
+
+        self.spin_swing_range.valueChanged.connect(self._on_swing_range_changed)
+        self.spin_swing_range_max.valueChanged.connect(self._on_swing_range_changed)
+        self.combo_swing_range_mode.currentIndexChanged.connect(self._on_swing_range_changed)
+
+        self._toolbar_row_a.addWidget(self._toolbar_section_filter)
+
+        # S3: Range / Forecast / Chart-type controls in a shared grid
+        self._toolbar_section_range = QWidget(toolbar_frame)
+        self._toolbar_section_range.setObjectName("toolbarSection")
+        self._toolbar_section_range.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+        range_grid = QGridLayout(self._toolbar_section_range)
+        range_grid.setContentsMargins(0, 0, 0, 0)
+        range_grid.setHorizontalSpacing(8)
+        range_grid.setVerticalSpacing(4)
+
+        range_label = QLabel("Range:", self._toolbar_section_range)
+        range_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+        range_grid.addWidget(range_label, 0, 0, alignment=vcenter)
+
+        range_row = QHBoxLayout()
+        range_row.setSpacing(12)
+
+        self.range_button_group = QButtonGroup(self)
+        self.range_button_group.setExclusive(True)
+
+        for tr in [
+            TimeRange.ONE_WEEK,
+            TimeRange.TWO_WEEKS,
+            TimeRange.THREE_WEEKS,
+            TimeRange.ONE_MONTH,
+            TimeRange.SIX_MONTHS,
+            TimeRange.ONE_YEAR,
+            TimeRange.FIVE_YEARS,
+        ]:
+            btn = QPushButton(tr.value, self._toolbar_section_range)
+            btn.setCheckable(True)
+            btn.setProperty("time_range", tr)
+            if tr == TimeRange.ONE_YEAR:
+                btn.setChecked(True)
+            btn.clicked.connect(self._on_range_changed)
+            self.range_button_group.addButton(btn)
+            range_row.addWidget(btn)
+
+        range_grid.addLayout(range_row, 0, 1, alignment=vcenter)
+
+        forecast_label = QLabel("Forecast:", self._toolbar_section_range)
+        forecast_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+        range_grid.addWidget(forecast_label, 1, 0, alignment=vcenter)
 
         forecast_row = QHBoxLayout()
         forecast_row.setSpacing(8)
 
-        forecast_label = QLabel("Forecast:", toolbar_frame)
-        forecast_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
-        forecast_row.addWidget(forecast_label)
-
-        self.combo_forecast = QComboBox(toolbar_frame)
+        self.combo_forecast = QComboBox(self._toolbar_section_range)
         self.combo_forecast.setToolTip(
             "Show a price projection for the selected horizon.\n"
             "Forecasts are estimates generated from local data — not advice."
@@ -338,8 +393,7 @@ class MainWindow(QMainWindow):
         self.combo_forecast.currentIndexChanged.connect(self._on_forecast_horizon_changed)
         forecast_row.addWidget(self.combo_forecast)
 
-
-        self.btn_forecast_generate = QPushButton("Generate", toolbar_frame)
+        self.btn_forecast_generate = QPushButton("Generate", self._toolbar_section_range)
         self.btn_forecast_generate.setToolTip(
             "Generate a forecast for the selected ticker using the current\n"
             "filter and swing configuration (does not save it)."
@@ -347,92 +401,27 @@ class MainWindow(QMainWindow):
         self.btn_forecast_generate.clicked.connect(self._on_generate_forecast_clicked)
         forecast_row.addWidget(self.btn_forecast_generate)
 
-        self.btn_forecast_save = QPushButton("Save", toolbar_frame)
+        self.btn_forecast_save = QPushButton("Save", self._toolbar_section_range)
         self.btn_forecast_save.setToolTip("Persist the current forecast to the local database")
         self.btn_forecast_save.clicked.connect(self._on_save_forecast_clicked)
         forecast_row.addWidget(self.btn_forecast_save)
 
-        self.btn_forecast_history = QPushButton("History…", toolbar_frame)
+        self.btn_forecast_history = QPushButton("History…", self._toolbar_section_range)
         self.btn_forecast_history.setToolTip("Browse, evaluate and delete saved forecasts")
         self.btn_forecast_history.clicked.connect(self._on_open_forecast_history)
         forecast_row.addWidget(self.btn_forecast_history)
 
-        forecast_row.addStretch()
-
         self.btn_forecast_generate.setEnabled(False)
         self.btn_forecast_save.setEnabled(False)
 
-        self.filter_stack_widget.setMinimumWidth(
-            max(
-                noise_row.sizeHint().width(),
-                swing_row.sizeHint().width(),
-                swing_range_row.sizeHint().width(),
-            )
-        )
-
-        self._load_swing_range_settings()
-
-        self.spin_swing_range.valueChanged.connect(self._on_swing_range_changed)
-        self.spin_swing_range_max.valueChanged.connect(self._on_swing_range_changed)
-        self.combo_swing_range_mode.currentIndexChanged.connect(self._on_swing_range_changed)
-
-        toolbar_layout.addWidget(self.filter_stack_widget)
-
-        toolbar_layout.addSpacing(15)
-
-        # Time Range Selector with the chart type selector stacked below it
-        range_stack = QVBoxLayout()
-        range_stack.setSpacing(4)
-
-        range_row = QHBoxLayout()
-        range_row.setSpacing(12)
-
-        range_label = QLabel("Range:", toolbar_frame)
-        range_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
-        range_row.addWidget(range_label)
-
-        self.range_button_group = QButtonGroup(self)
-        self.range_button_group.setExclusive(True)
-
-        for tr in [
-            TimeRange.ONE_WEEK,
-            TimeRange.TWO_WEEKS,
-            TimeRange.THREE_WEEKS,
-            TimeRange.ONE_MONTH,
-            TimeRange.SIX_MONTHS,
-            TimeRange.ONE_YEAR,
-            TimeRange.FIVE_YEARS,
-        ]:
-            btn = QPushButton(tr.value, toolbar_frame)
-            btn.setCheckable(True)
-            btn.setProperty("time_range", tr)
-            if tr == TimeRange.ONE_YEAR:
-                btn.setChecked(True)
-            btn.clicked.connect(self._on_range_changed)
-            self.range_button_group.addButton(btn)
-            range_row.addWidget(btn)
-
-        range_stack.addLayout(range_row)
-
-        # Forecast controls sit between the range buttons and the chart type row
-        range_stack.addLayout(forecast_row)
-
-        chart_row = QHBoxLayout()
-        chart_row.setSpacing(8)
+        range_grid.addLayout(forecast_row, 1, 1, alignment=vcenter)
 
         # Price Chart Type Selector (Line / Candle / Baseline)
-        chart_label = QLabel("Chart type:", toolbar_frame)
+        chart_label = QLabel("Chart type:", self._toolbar_section_range)
         chart_label.setStyleSheet("color: #8b90a0; font-weight: bold;")
+        range_grid.addWidget(chart_label, 2, 0, alignment=vcenter)
 
-        forecast_label_width = max(
-            forecast_label.sizeHint().width(), chart_label.sizeHint().width()
-        )
-        forecast_label.setFixedWidth(forecast_label_width)
-        chart_label.setFixedWidth(forecast_label_width)
-
-        chart_row.addWidget(chart_label)
-
-        self.combo_chart_type = QComboBox(toolbar_frame)
+        self.combo_chart_type = QComboBox(self._toolbar_section_range)
         self.combo_chart_type.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.combo_chart_type.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         for chart_type in ChartType:
@@ -463,26 +452,33 @@ class MainWindow(QMainWindow):
             "Baseline: close relative to the first price in the range."
         )
         self.combo_chart_type.currentIndexChanged.connect(self._on_chart_type_changed)
-        chart_row.addWidget(self.combo_chart_type)
-        chart_row.addStretch()
+        range_grid.addWidget(self.combo_chart_type, 2, 1, alignment=vcenter)
 
-        range_stack.addLayout(chart_row)
+        self._toolbar_row_a.addWidget(self._toolbar_section_range)
 
-        toolbar_layout.addLayout(range_stack)
+        self._toolbar_row_a.addStretch()
 
-        toolbar_layout.addStretch()
+        # S4: trailing actions
+        self._toolbar_section_actions = QWidget(toolbar_frame)
+        self._toolbar_section_actions.setObjectName("toolbarSection")
+        self._toolbar_section_actions.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+        actions_layout = QHBoxLayout(self._toolbar_section_actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(12)
 
-        # Manage Tickers Button
-        self.btn_admin = QPushButton("Manage Tickers", toolbar_frame)
+        self.btn_admin = QPushButton("Manage Tickers", self._toolbar_section_actions)
         self.btn_admin.setToolTip("Add, remove, or reorder tickers (Ctrl+T)")
         self.btn_admin.clicked.connect(self._on_open_admin)
-        toolbar_layout.addWidget(self.btn_admin)
+        actions_layout.addWidget(self.btn_admin)
 
-        # Reset View Button
-        self.btn_reset_view = QPushButton("Reset Zoom", toolbar_frame)
+        self.btn_reset_view = QPushButton("Reset Zoom", self._toolbar_section_actions)
         self.btn_reset_view.setToolTip("Reset chart zoom and pan")
         self.btn_reset_view.clicked.connect(self._on_reset_view)
-        toolbar_layout.addWidget(self.btn_reset_view)
+        actions_layout.addWidget(self.btn_reset_view)
+
+        self._toolbar_row_a.addWidget(self._toolbar_section_actions)
 
         main_layout.addWidget(toolbar_frame)
 
@@ -504,7 +500,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.trend_filter_bar)
 
         sidebar_header = QLabel("MARKET WATCH", sidebar_frame)
-        sidebar_header.setStyleSheet("font-size: 11px; font-weight: bold; color: #8b90a0; letter-spacing: 1px;")
+        sidebar_header.setStyleSheet("font-size: 8.25pt; font-weight: bold; color: #8b90a0; letter-spacing: 1px;")
         sidebar_layout.addWidget(sidebar_header)
 
         sort_row = QHBoxLayout()
@@ -572,7 +568,7 @@ class MainWindow(QMainWindow):
                 border-top-right-radius: 0px;
                 border-bottom-right-radius: 0px;
                 padding: 4px 6px;
-                font-size: 11px;
+                font-size: 8.25pt;
                 font-weight: 600;
             }
             QPushButton#btnSortAsc:hover {
@@ -602,7 +598,7 @@ class MainWindow(QMainWindow):
                 border-top-right-radius: 4px;
                 border-bottom-right-radius: 4px;
                 padding: 4px 6px;
-                font-size: 11px;
+                font-size: 8.25pt;
                 font-weight: 600;
             }
             QPushButton#btnSortDesc:hover {
@@ -672,11 +668,11 @@ class MainWindow(QMainWindow):
         info_box = QVBoxLayout()
         info_box.setAlignment(Qt.AlignRight)
         self.lbl_high_low = QLabel("High: -- | Low: --", right_panel)
-        self.lbl_high_low.setStyleSheet("color: #8b90a0; font-size: 12px; font-weight: bold;")
+        self.lbl_high_low.setStyleSheet("color: #8b90a0; font-size: 9pt; font-weight: bold;")
         self.lbl_info_range = QLabel("Range: 1 Year", right_panel)
-        self.lbl_info_range.setStyleSheet("color: #8b90a0; font-size: 11px;")
+        self.lbl_info_range.setStyleSheet("color: #8b90a0; font-size: 8.25pt;")
         self.lbl_last_sync = QLabel("Last Sync: Never", right_panel)
-        self.lbl_last_sync.setStyleSheet("color: #8b90a0; font-size: 11px;")
+        self.lbl_last_sync.setStyleSheet("color: #8b90a0; font-size: 8.25pt;")
         info_box.addWidget(self.lbl_high_low)
         info_box.addWidget(self.lbl_info_range)
         info_box.addWidget(self.lbl_last_sync)
@@ -690,7 +686,7 @@ class MainWindow(QMainWindow):
 
         perf_title = QLabel("PERFORMANCE", right_panel)
         perf_title.setStyleSheet(
-            "font-size: 11px; font-weight: bold; color: #8b90a0; letter-spacing: 1px;"
+            "font-size: 8.25pt; font-weight: bold; color: #8b90a0; letter-spacing: 1px;"
         )
         perf_title.setAlignment(Qt.AlignVCenter)
         perf_row.addWidget(perf_title)
@@ -704,7 +700,7 @@ class MainWindow(QMainWindow):
 
             range_label = QLabel(key, right_panel)
             range_label.setAlignment(Qt.AlignCenter)
-            range_label.setStyleSheet("font-size: 10px; font-weight: bold; color: #8b90a0;")
+            range_label.setStyleSheet("font-size: 7.5pt; font-weight: bold; color: #8b90a0;")
             range_label.setToolTip(f"Price change over the last {key} (local data)")
 
             value_label = QLabel("--", right_panel)
@@ -747,6 +743,57 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready. Select a ticker to view chart.")
+
+        QTimer.singleShot(0, self._arrange_toolbar)
+
+    def _arrange_toolbar(self) -> None:
+        """Keeps the toolbar on one row when it fits; stacks S3/S4 otherwise."""
+        available = (
+            self._toolbar_frame.width()
+            - self._toolbar_frame.contentsMargins().left()
+            - self._toolbar_frame.contentsMargins().right()
+        )
+        if available <= 0:
+            return
+
+        sections_single = (
+            self._toolbar_section_updates,
+            self._toolbar_section_filter,
+            self._toolbar_section_range,
+            self._toolbar_section_actions,
+        )
+        spacing = self._toolbar_row_a.spacing()
+        single_row_width = sum(
+            section.sizeHint().width() for section in sections_single
+        ) + spacing * (len(sections_single) - 1)
+
+        stacked = single_row_width > available
+        if stacked == self._toolbar_stacked:
+            return
+        self._toolbar_stacked = stacked
+
+        for row in (self._toolbar_row_a, self._toolbar_row_b):
+            while row.count():
+                row.takeAt(0)
+
+        row_a = self._toolbar_row_a
+        row_b = self._toolbar_row_b
+
+        row_a.addWidget(self._toolbar_section_updates)
+        row_a.addWidget(self._toolbar_section_filter)
+        row_a.addStretch()
+
+        if stacked:
+            row_b.addWidget(self._toolbar_section_range)
+            row_b.addStretch()
+            row_b.addWidget(self._toolbar_section_actions)
+        else:
+            row_a.addWidget(self._toolbar_section_range)
+            row_a.addWidget(self._toolbar_section_actions)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._arrange_toolbar()
 
     def _setup_shortcuts(self) -> None:
         """Configures global application keyboard shortcuts."""
