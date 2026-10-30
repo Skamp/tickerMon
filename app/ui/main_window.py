@@ -107,9 +107,15 @@ class MainWindow(QMainWindow):
         self.forecast_service = forecast_service
 
         self.setWindowTitle("tickerMon - Stock Market Terminal")
-        width_scale = window_width_scale()
-        self.resize(int(DEFAULT_WINDOW_WIDTH * width_scale), DEFAULT_WINDOW_HEIGHT)
-        self.setMinimumSize(int(MIN_WINDOW_WIDTH * width_scale), MIN_WINDOW_HEIGHT)
+        size_scale = window_width_scale()
+        self.resize(
+            int(DEFAULT_WINDOW_WIDTH * size_scale),
+            int(DEFAULT_WINDOW_HEIGHT * size_scale),
+        )
+        self.setMinimumSize(
+            int(MIN_WINDOW_WIDTH * size_scale),
+            int(MIN_WINDOW_HEIGHT * size_scale),
+        )
 
         self._active_range = TimeRange.ONE_YEAR
         self._active_chart_type = ChartType.LINE
