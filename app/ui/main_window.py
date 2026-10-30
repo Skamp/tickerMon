@@ -549,7 +549,10 @@ class MainWindow(QMainWindow):
         self.combo_sort.currentIndexChanged.connect(self._on_sort_changed)
         sort_row.addWidget(self.combo_sort, 1)
 
-        # Segmented sort direction buttons: [ ▲ Ascending ] [ ▼ Descending ]
+        sidebar_layout.addLayout(sort_row)
+
+        # Segmented sort direction buttons: [ ▲ Ascending | ▼ Descending ]
+        # on their own row below the sort combo.
         direction_container = QWidget(sidebar_frame)
         direction_layout = QHBoxLayout(direction_container)
         direction_layout.setContentsMargins(0, 0, 0, 0)
@@ -622,13 +625,11 @@ class MainWindow(QMainWindow):
 
         self.sort_direction_group.addButton(self.btn_sort_asc)
         self.sort_direction_group.addButton(self.btn_sort_desc)
-        direction_layout.addWidget(self.btn_sort_asc)
-        direction_layout.addWidget(self.btn_sort_desc)
+        direction_layout.addWidget(self.btn_sort_asc, 1)
+        direction_layout.addWidget(self.btn_sort_desc, 1)
         self.btn_sort_asc.clicked.connect(self._on_sort_direction_changed)
         self.btn_sort_desc.clicked.connect(self._on_sort_direction_changed)
-        sort_row.addWidget(direction_container)
-
-        sidebar_layout.addLayout(sort_row)
+        sidebar_layout.addWidget(direction_container)
 
         self.ticker_list = TickerListWidget(sidebar_frame)
         self.ticker_list.ticker_selected.connect(self._on_ticker_selected)
@@ -741,7 +742,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_panel)
 
         # Splitter sizing ratio
-        splitter.setSizes([260, 1080])
+        splitter.setSizes([230, 1110])
         splitter.setCollapsible(0, False)
 
         main_layout.addWidget(splitter)

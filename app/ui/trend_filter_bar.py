@@ -64,7 +64,7 @@ class TrendFilterBar(QWidget):
                 border: 1px solid #323647;
                 border-radius: 4px;
                 padding: 6px 8px;
-                font-size: 8.25pt;
+                font-size: 9pt;
                 font-weight: 600;
             }
             TrendFilterBar QPushButton:hover {
