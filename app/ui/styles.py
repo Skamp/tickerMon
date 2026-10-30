@@ -69,6 +69,19 @@ QPushButton#updateButton:hover {
     border-color: #69f0ae;
 }
 
+QPushButton#manageButton {
+    background-color: #00bfa5;
+    color: #ffffff;
+    border-color: #1de9b6;
+    font-weight: bold;
+    padding: 7px 18px;
+}
+
+QPushButton#manageButton:hover {
+    background-color: #1de9b6;
+    border-color: #64ffda;
+}
+
 /* List Widgets */
 QListWidget {
     background-color: #1a1c24;

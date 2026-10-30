@@ -193,6 +193,12 @@ class MainWindow(QMainWindow):
         self.btn_update_new.clicked.connect(self._on_update_new_clicked)
         updates_layout.addWidget(self.btn_update_new)
 
+        self.btn_admin = QPushButton("Manage Tickers", self._toolbar_section_updates)
+        self.btn_admin.setObjectName("manageButton")
+        self.btn_admin.setToolTip("Add, remove, or reorder tickers (Ctrl+T)")
+        self.btn_admin.clicked.connect(self._on_open_admin)
+        updates_layout.addWidget(self.btn_admin)
+
         self._toolbar_row_a.addWidget(self._toolbar_section_updates)
 
         # S2: Filter / Swing / Duration controls in a shared grid
@@ -480,11 +486,6 @@ class MainWindow(QMainWindow):
         actions_layout = QHBoxLayout(self._toolbar_section_actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(12)
-
-        self.btn_admin = QPushButton("Manage Tickers", self._toolbar_section_actions)
-        self.btn_admin.setToolTip("Add, remove, or reorder tickers (Ctrl+T)")
-        self.btn_admin.clicked.connect(self._on_open_admin)
-        actions_layout.addWidget(self.btn_admin)
 
         self.btn_reset_view = QPushButton("Reset Zoom", self._toolbar_section_actions)
         self.btn_reset_view.setToolTip("Reset chart zoom and pan")
