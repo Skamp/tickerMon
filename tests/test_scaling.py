@@ -3,9 +3,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from app.ui import scaling
 from app.ui.scaling import (
     DEFAULT_ROUNDING_POLICY,
+    DEFAULT_SEEDED_UI_SCALE,
     FONT_FAMILY_CANDIDATES,
     apply_scaling_env,
     consume_debug_flag,
@@ -13,6 +16,8 @@ from app.ui.scaling import (
     resolve_font_family,
     resolve_scale_factor,
     scaling_summary,
+    seed_default_scale,
+    should_seed_default_scale,
 )
 
 _MANAGED_ENV_VARS = (
@@ -103,8 +108,15 @@ class TestApplyScalingEnv(unittest.TestCase):
             os.environ.pop(name, None)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.config_path = Path(self.temp_dir.name) / "tickers.json"
+        # Pin a pre-seeding Python version so these assertions stay valid on
+        # any interpreter; the seeding behavior itself has dedicated tests.
+        self._version_patcher = mock.patch.object(
+            scaling.sys, "version_info", (3, 12, 0)
+        )
+        self._version_patcher.start()
 
     def tearDown(self):
+        self._version_patcher.stop()
         for name, value in self._saved.items():
             if value is None:
                 os.environ.pop(name, None)
@@ -132,13 +144,13 @@ class TestApplyScalingEnv(unittest.TestCase):
         self.assertEqual(scale, 1.25)
         self.assertEqual(os.environ["QT_SCALE_FACTOR"], "1.25")
 
-    def test_config_ui_scale_is_ignored(self):
+    def test_config_ui_scale_is_applied(self):
         self._write_config({"ui_scale": 1.5})
         scale = apply_scaling_env(self.config_path)
-        self.assertIsNone(scale)
-        self.assertNotIn("QT_SCALE_FACTOR", os.environ)
+        self.assertEqual(scale, 1.5)
+        self.assertEqual(os.environ["QT_SCALE_FACTOR"], "1.5")
 
-    def test_env_scale_applies_even_with_config_ui_scale(self):
+    def test_env_scale_wins_over_config_ui_scale(self):
         self._write_config({"ui_scale": 1.5})
         os.environ["TICKERMON_SCALE"] = "2"
         scale = apply_scaling_env(self.config_path)
@@ -159,12 +171,113 @@ class TestApplyScalingEnv(unittest.TestCase):
         scale = apply_scaling_env(self.config_path)
         self.assertIsNone(scale)
 
-    def test_config_file_not_written(self):
+    def test_config_file_not_written_on_pre_seed_python(self):
         self._write_config({"selected_range": "1Y"})
         apply_scaling_env(self.config_path)
         data = json.loads(self.config_path.read_text(encoding="utf-8"))
         self.assertNotIn("ui_scale", data)
         self.assertEqual(data["selected_range"], "1Y")
+
+
+class TestSeedDefaultScale(unittest.TestCase):
+    def setUp(self):
+        self._saved = {
+            name: os.environ.get(name) for name in _MANAGED_ENV_VARS
+        }
+        for name in _MANAGED_ENV_VARS:
+            os.environ.pop(name, None)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.config_path = Path(self.temp_dir.name) / "tickers.json"
+
+    def tearDown(self):
+        for name, value in self._saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        self.temp_dir.cleanup()
+
+    def _write_config(self, data):
+        self.config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_should_seed_version_matrix(self):
+        self.assertTrue(should_seed_default_scale((3, 13)))
+        self.assertTrue(should_seed_default_scale((3, 14, 4)))
+        self.assertFalse(should_seed_default_scale((3, 12, 6)))
+        self.assertFalse(should_seed_default_scale((3, 8, 10)))
+        self.assertFalse(should_seed_default_scale(None))
+        self.assertFalse(should_seed_default_scale("3.14"))
+
+    def test_seeds_missing_file(self):
+        self.assertTrue(
+            seed_default_scale(self.config_path, version_info=(3, 14, 0))
+        )
+        data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["ui_scale"], DEFAULT_SEEDED_UI_SCALE)
+
+    def test_seeds_preserving_existing_keys(self):
+        self._write_config({"selected_range": "6M", "tickers": [{"symbol": "AAPL"}]})
+        self.assertTrue(
+            seed_default_scale(self.config_path, version_info=(3, 14, 0))
+        )
+        data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["ui_scale"], DEFAULT_SEEDED_UI_SCALE)
+        self.assertEqual(data["selected_range"], "6M")
+        self.assertEqual(data["tickers"], [{"symbol": "AAPL"}])
+
+    def test_never_overwrites_existing_value(self):
+        self._write_config({"ui_scale": 2.0})
+        self.assertFalse(
+            seed_default_scale(self.config_path, version_info=(3, 14, 0))
+        )
+        data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["ui_scale"], 2.0)
+
+    def test_skips_on_python_312(self):
+        self.assertFalse(
+            seed_default_scale(self.config_path, version_info=(3, 12, 6))
+        )
+        self.assertFalse(self.config_path.exists())
+
+    def test_skips_on_python_38(self):
+        self.assertFalse(
+            seed_default_scale(self.config_path, version_info=(3, 8, 10))
+        )
+        self.assertFalse(self.config_path.exists())
+
+    def test_skips_corrupt_file_untouched(self):
+        corrupt = "{not json"
+        self.config_path.write_text(corrupt, encoding="utf-8")
+        with self.assertLogs("app.ui.scaling", level="WARNING"):
+            self.assertFalse(
+                seed_default_scale(self.config_path, version_info=(3, 14, 0))
+            )
+        self.assertEqual(
+            self.config_path.read_text(encoding="utf-8"), corrupt
+        )
+
+    def test_none_path(self):
+        self.assertFalse(seed_default_scale(None, version_info=(3, 14, 0)))
+
+    def test_apply_seeds_then_resolves(self):
+        self._write_config({"selected_range": "1Y"})
+        with mock.patch.object(scaling.sys, "version_info", (3, 14, 0)):
+            scale = apply_scaling_env(self.config_path)
+        self.assertEqual(scale, DEFAULT_SEEDED_UI_SCALE)
+        self.assertEqual(os.environ["QT_SCALE_FACTOR"], "1.5")
+        data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["ui_scale"], DEFAULT_SEEDED_UI_SCALE)
+        self.assertEqual(data["selected_range"], "1Y")
+
+    def test_env_still_wins_over_seeded_config(self):
+        self._write_config({"selected_range": "1Y"})
+        os.environ["TICKERMON_SCALE"] = "2"
+        with mock.patch.object(scaling.sys, "version_info", (3, 14, 0)):
+            scale = apply_scaling_env(self.config_path)
+        self.assertEqual(scale, 2.0)
+        self.assertEqual(os.environ["QT_SCALE_FACTOR"], "2")
+        data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["ui_scale"], DEFAULT_SEEDED_UI_SCALE)
 
 
 class TestScalingSummary(unittest.TestCase):

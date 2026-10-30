@@ -202,14 +202,19 @@ startup.
 
 The default font family is resolved against the fonts actually installed on
 the machine (candidates: `Segoe UI`, `Noto Sans`, `DejaVu Sans`, `Ubuntu`).
-A legacy `ui_scale` value in `config/tickers.json` is reported at startup and
-ignored — every Python/Qt build follows the same scaling policy.
+
+On Python 3.13 and newer, a default `"ui_scale": 1.5` is seeded into
+`config/tickers.json` on the first launch where the key is missing, so the
+UI matches the 150%-scaled reference machine. An existing value is never
+overwritten — edit or delete the key to opt out, or use `TICKERMON_SCALE`
+for a per-run override.
 
 Scale/font overrides (highest precedence first):
 
 | Override | Effect |
 | :--- | :--- |
 | `TICKERMON_SCALE` (env) | Global scale multiplier on top of OS display scaling (e.g. `TICKERMON_SCALE=1.25`) |
+| `ui_scale` (config) | Persisted scale multiplier written to `config/tickers.json` (seeded as `1.5` on Python >= 3.13) |
 | `TICKERMON_FONT_FAMILY` / `TICKERMON_FONT_POINT` (env) | Override the pinned application font family / point size |
 
 ---

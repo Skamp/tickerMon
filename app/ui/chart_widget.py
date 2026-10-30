@@ -1049,6 +1049,10 @@ class StockChartWidget(QWidget):
         for item in self._structure_items:
             item.setVisible(self._structure_visible)
 
+    def has_structure_labels(self) -> bool:
+        """True when structure label items are currently present on the plot."""
+        return bool(self._structure_items)
+
     def clear_structure_labels(self) -> None:
         """Removes all market-structure label items from the plot."""
         for item in self._structure_items:

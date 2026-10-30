@@ -1293,9 +1293,11 @@ class MainWindow(QMainWindow):
             )
 
     def _on_structure_labels_toggled(self, checked: bool) -> None:
-        """Toggles label visibility without recalculating the swing structure."""
+        """Shows/hides market-structure labels, redrawing them when needed."""
         self.ticker_service.set_show_structure_labels(checked)
         self.chart_widget.set_structure_labels_visible(checked)
+        if checked and not self.chart_widget.has_structure_labels():
+            self._update_swing_overlay()
         self.status_bar.showMessage(
             f"Market structure labels {'shown' if checked else 'hidden'}."
         )

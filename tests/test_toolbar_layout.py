@@ -65,6 +65,9 @@ class TestToolbarLayout(unittest.TestCase):
         cls.temp_dir = tempfile.mkdtemp()
         config_dst = Path(cls.temp_dir) / "tickers.json"
         shutil.copy(_ROOT / "config" / "tickers.json", config_dst)
+        db_src = _ROOT / "data" / "market_data.db"
+        if db_src.exists():
+            shutil.copy(db_src, Path(cls.temp_dir) / "market_data.db")
 
         from app.config.config_manager import ConfigManager
         from app.database.database import Database
@@ -141,6 +144,33 @@ class TestToolbarLayout(unittest.TestCase):
             self.window._toolbar_section_actions,
         ):
             self.assertIsNotNone(section)
+
+    def test_structure_labels_toggle_redraws_when_cleared(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        chk = self.window.chk_structure_labels
+        chart = self.window.chart_widget
+
+        chk.setChecked(False)
+        self.app.processEvents()
+        self.assertFalse(chart.has_structure_labels())
+
+        QTest.mouseClick(chk, Qt.LeftButton, Qt.NoModifier, chk.rect().center())
+        self.app.processEvents()
+        self.assertTrue(chk.isChecked())
+        self.assertTrue(chart.has_structure_labels())
+        self.assertTrue(all(item.isVisible() for item in chart._structure_items))
+
+        QTest.mouseClick(chk, Qt.LeftButton, Qt.NoModifier, chk.rect().center())
+        self.app.processEvents()
+        self.assertFalse(chk.isChecked())
+        self.assertFalse(any(item.isVisible() for item in chart._structure_items))
+
+        QTest.mouseClick(chk, Qt.LeftButton, Qt.NoModifier, chk.rect().center())
+        self.app.processEvents()
+        self.assertTrue(chk.isChecked())
+        self.assertTrue(all(item.isVisible() for item in chart._structure_items))
 
 
 if __name__ == "__main__":
