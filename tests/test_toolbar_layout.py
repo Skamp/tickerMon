@@ -145,6 +145,53 @@ class TestToolbarLayout(unittest.TestCase):
         ):
             self.assertIsNotNone(section)
 
+    def test_scaled_window_is_wide_enough_for_single_row_toolbar(self):
+        import os
+        from app.ui.main_window import (
+            DEFAULT_WINDOW_WIDTH,
+            MIN_WINDOW_WIDTH,
+        )
+        from app.ui.scaling import effective_scale_factor
+
+        saved = os.environ.get("QT_SCALE_FACTOR")
+        os.environ["QT_SCALE_FACTOR"] = "1.5"
+        try:
+            scale = effective_scale_factor()
+            self.assertEqual(scale, 1.5)
+            scaled_default = int(DEFAULT_WINDOW_WIDTH * scale)
+            scaled_min = int(MIN_WINDOW_WIDTH * scale)
+            self.assertEqual(scaled_default, 2220)
+            self.assertEqual(scaled_min, 1860)
+
+            self.window.resize(scaled_default, 780)
+            self.app.processEvents()
+            frame = self.window._toolbar_frame
+            margins = frame.contentsMargins()
+            needed = sum(
+                section.sizeHint().width()
+                for section in (
+                    self.window._toolbar_section_updates,
+                    self.window._toolbar_section_filter,
+                    self.window._toolbar_section_range,
+                    self.window._toolbar_section_actions,
+                )
+            ) + self.window._toolbar_row_a.spacing() * 3
+            available = frame.width() - margins.left() - margins.right()
+            self.assertGreaterEqual(
+                available,
+                needed,
+                "scaled default width %d still stacks the toolbar (needed %d)"
+                % (scaled_default, needed),
+            )
+            self.assertFalse(self.window._toolbar_stacked)
+        finally:
+            if saved is None:
+                os.environ.pop("QT_SCALE_FACTOR", None)
+            else:
+                os.environ["QT_SCALE_FACTOR"] = saved
+            self.window.resize(1480, 780)
+            self.app.processEvents()
+
     def test_structure_labels_toggle_redraws_when_cleared(self):
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest

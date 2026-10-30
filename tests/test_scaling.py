@@ -12,6 +12,7 @@ from app.ui.scaling import (
     FONT_FAMILY_CANDIDATES,
     apply_scaling_env,
     consume_debug_flag,
+    effective_scale_factor,
     parse_positive_float,
     resolve_font_family,
     resolve_scale_factor,
@@ -305,6 +306,33 @@ class TestScalingSummary(unittest.TestCase):
         summary = scaling_summary()
         self.assertIn("PassThrough", summary)
         self.assertIn("1.25", summary)
+
+
+class TestEffectiveScaleFactor(unittest.TestCase):
+    def setUp(self):
+        self._saved = os.environ.get("QT_SCALE_FACTOR")
+        os.environ.pop("QT_SCALE_FACTOR", None)
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("QT_SCALE_FACTOR", None)
+        else:
+            os.environ["QT_SCALE_FACTOR"] = self._saved
+
+    def test_defaults_to_one_when_unset(self):
+        self.assertEqual(effective_scale_factor(), 1.0)
+
+    def test_reads_active_qt_scale_factor(self):
+        os.environ["QT_SCALE_FACTOR"] = "1.5"
+        self.assertEqual(effective_scale_factor(), 1.5)
+
+    def test_invalid_value_falls_back_to_one(self):
+        os.environ["QT_SCALE_FACTOR"] = "not-a-number"
+        self.assertEqual(effective_scale_factor(), 1.0)
+
+    def test_non_positive_falls_back_to_one(self):
+        os.environ["QT_SCALE_FACTOR"] = "0"
+        self.assertEqual(effective_scale_factor(), 1.0)
 
 
 class _StubGeometry:

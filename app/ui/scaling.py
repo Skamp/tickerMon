@@ -230,6 +230,15 @@ def scaling_summary() -> str:
     return ", ".join(parts) if parts else "Qt defaults (no overrides set)"
 
 
+def effective_scale_factor() -> float:
+    """Returns the active Qt scale override (``QT_SCALE_FACTOR``), or 1.0.
+
+    Read after ``apply_scaling_env()`` so UI code can size windows against
+    the same factor Qt will apply (seeded ``ui_scale`` or ``TICKERMON_SCALE``).
+    """
+    return parse_positive_float(os.environ.get(_SCALE_ENV_VAR)) or 1.0
+
+
 def setup_display_scaling(app: Any) -> Any:
     """Sets the explicit application-wide default font (after QApplication).
 
