@@ -239,6 +239,19 @@ def effective_scale_factor() -> float:
     return parse_positive_float(os.environ.get(_SCALE_ENV_VAR)) or 1.0
 
 
+def window_width_scale(scale: Optional[float] = None) -> float:
+    """Damped multiplier for the default window width under a scale override.
+
+    Qt already applies ``QT_SCALE_FACTOR`` to rendering, so sizing the window
+    by the full factor again makes it physically ~scale² larger. Only half of
+    the scale delta is applied to the logical width: enough extra room for the
+    wider toolbar widgets without the window blowing up on HiDPI displays.
+    """
+    if scale is None:
+        scale = effective_scale_factor()
+    return 1.0 + (max(scale, 1.0) - 1.0) * 0.5
+
+
 def setup_display_scaling(app: Any) -> Any:
     """Sets the explicit application-wide default font (after QApplication).
 

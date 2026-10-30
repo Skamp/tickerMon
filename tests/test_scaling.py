@@ -19,6 +19,7 @@ from app.ui.scaling import (
     scaling_summary,
     seed_default_scale,
     should_seed_default_scale,
+    window_width_scale,
 )
 
 _MANAGED_ENV_VARS = (
@@ -333,6 +334,32 @@ class TestEffectiveScaleFactor(unittest.TestCase):
     def test_non_positive_falls_back_to_one(self):
         os.environ["QT_SCALE_FACTOR"] = "0"
         self.assertEqual(effective_scale_factor(), 1.0)
+
+
+class TestWindowWidthScale(unittest.TestCase):
+    def test_identity_when_no_scale(self):
+        self.assertEqual(window_width_scale(1.0), 1.0)
+
+    def test_half_delta_at_1_5(self):
+        self.assertEqual(window_width_scale(1.5), 1.25)
+
+    def test_reduced_vs_full_factor(self):
+        self.assertLess(window_width_scale(1.5), 1.5)
+        self.assertLess(window_width_scale(2.0), 2.0)
+
+    def test_below_one_clamps_to_identity(self):
+        self.assertEqual(window_width_scale(0.5), 1.0)
+
+    def test_reads_active_env_when_omitted(self):
+        saved = os.environ.get("QT_SCALE_FACTOR")
+        os.environ["QT_SCALE_FACTOR"] = "1.5"
+        try:
+            self.assertEqual(window_width_scale(), 1.25)
+        finally:
+            if saved is None:
+                os.environ.pop("QT_SCALE_FACTOR", None)
+            else:
+                os.environ["QT_SCALE_FACTOR"] = saved
 
 
 class _StubGeometry:

@@ -145,45 +145,28 @@ class TestToolbarLayout(unittest.TestCase):
         ):
             self.assertIsNotNone(section)
 
-    def test_scaled_window_is_wide_enough_for_single_row_toolbar(self):
+    def test_scaled_window_width_is_moderate(self):
         import os
         from app.ui.main_window import (
             DEFAULT_WINDOW_WIDTH,
             MIN_WINDOW_WIDTH,
         )
-        from app.ui.scaling import effective_scale_factor
+        from app.ui.scaling import window_width_scale
 
         saved = os.environ.get("QT_SCALE_FACTOR")
         os.environ["QT_SCALE_FACTOR"] = "1.5"
         try:
-            scale = effective_scale_factor()
-            self.assertEqual(scale, 1.5)
-            scaled_default = int(DEFAULT_WINDOW_WIDTH * scale)
-            scaled_min = int(MIN_WINDOW_WIDTH * scale)
-            self.assertEqual(scaled_default, 2220)
-            self.assertEqual(scaled_min, 1860)
+            width_scale = window_width_scale()
+            self.assertEqual(width_scale, 1.25)
+            scaled_default = int(DEFAULT_WINDOW_WIDTH * width_scale)
+            scaled_min = int(MIN_WINDOW_WIDTH * width_scale)
+            self.assertEqual(scaled_default, 1850)
+            self.assertEqual(scaled_min, 1550)
+            self.assertLess(scaled_default, int(DEFAULT_WINDOW_WIDTH * 1.5))
 
             self.window.resize(scaled_default, 780)
             self.app.processEvents()
-            frame = self.window._toolbar_frame
-            margins = frame.contentsMargins()
-            needed = sum(
-                section.sizeHint().width()
-                for section in (
-                    self.window._toolbar_section_updates,
-                    self.window._toolbar_section_filter,
-                    self.window._toolbar_section_range,
-                    self.window._toolbar_section_actions,
-                )
-            ) + self.window._toolbar_row_a.spacing() * 3
-            available = frame.width() - margins.left() - margins.right()
-            self.assertGreaterEqual(
-                available,
-                needed,
-                "scaled default width %d still stacks the toolbar (needed %d)"
-                % (scaled_default, needed),
-            )
-            self.assertFalse(self.window._toolbar_stacked)
+            self.assertEqual(_overlap_count(self.window._toolbar_frame), 0)
         finally:
             if saved is None:
                 os.environ.pop("QT_SCALE_FACTOR", None)

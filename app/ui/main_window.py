@@ -76,7 +76,7 @@ from app.ui.swing_settings_dialog import SwingSettingsDialog
 from app.ui.forecast_history_dialog import ForecastHistoryDialog
 from app.ui.trend_filter_bar import TrendFilterBar
 from app.ui.update_dialog import UpdateProgressDialog
-from app.ui.scaling import effective_scale_factor
+from app.ui.scaling import window_width_scale
 from app.workers.update_worker import UpdateWorker
 from app.workers.earnings_worker import EarningsWorker
 
@@ -107,9 +107,9 @@ class MainWindow(QMainWindow):
         self.forecast_service = forecast_service
 
         self.setWindowTitle("tickerMon - Stock Market Terminal")
-        scale = effective_scale_factor()
-        self.resize(int(DEFAULT_WINDOW_WIDTH * scale), DEFAULT_WINDOW_HEIGHT)
-        self.setMinimumSize(int(MIN_WINDOW_WIDTH * scale), MIN_WINDOW_HEIGHT)
+        width_scale = window_width_scale()
+        self.resize(int(DEFAULT_WINDOW_WIDTH * width_scale), DEFAULT_WINDOW_HEIGHT)
+        self.setMinimumSize(int(MIN_WINDOW_WIDTH * width_scale), MIN_WINDOW_HEIGHT)
 
         self._active_range = TimeRange.ONE_YEAR
         self._active_chart_type = ChartType.LINE
