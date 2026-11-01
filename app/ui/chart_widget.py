@@ -364,12 +364,18 @@ class StockChartWidget(QWidget):
         self.plot_item.hideAxis("left")
         self.plot_item.showGrid(x=True, y=True, alpha=0.10)
         self.plot_item.setMenuEnabled(True)
+        self.plot_item.autoBtn.clicked.disconnect(self.plot_item.autoBtnClicked)
+        self.plot_item.autoBtn.clicked.connect(self.reset_view)
 
         # Compact volume panel below the price chart; its time axis is X-linked
         # to the price ViewBox so zoom, pan, range and ticker changes always
         # keep both charts on exactly the same time scale.
         self.volume_chart = VolumeChartWidget(self)
         self.volume_chart.plot_item.vb.setXLink(self.plot_item.vb)
+        self.volume_chart.plot_item.autoBtn.clicked.disconnect(
+            self.volume_chart.plot_item.autoBtnClicked
+        )
+        self.volume_chart.plot_item.autoBtn.clicked.connect(self.reset_view)
         self.layout.addWidget(self.volume_chart, 1)
 
         # Raw Price Plot Curve Pen (1.2px width)
@@ -905,6 +911,9 @@ class StockChartWidget(QWidget):
             yMax=y_hi,
             maxYRange=y_hi - y_lo,
         )
+        self.plot_item.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=False)
+        self.plot_item.setXRange(x_lo, x_hi, padding=0)
+        self.plot_item.setYRange(y_lo, y_hi, padding=0)
 
     def set_overlay_data(
         self,

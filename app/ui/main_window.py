@@ -477,23 +477,6 @@ class MainWindow(QMainWindow):
 
         self._toolbar_row_a.addStretch()
 
-        # S4: trailing actions
-        self._toolbar_section_actions = QWidget(toolbar_frame)
-        self._toolbar_section_actions.setObjectName("toolbarSection")
-        self._toolbar_section_actions.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
-        )
-        actions_layout = QHBoxLayout(self._toolbar_section_actions)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(12)
-
-        self.btn_reset_view = QPushButton("Reset Zoom", self._toolbar_section_actions)
-        self.btn_reset_view.setToolTip("Reset chart zoom and pan")
-        self.btn_reset_view.clicked.connect(self._on_reset_view)
-        actions_layout.addWidget(self.btn_reset_view)
-
-        self._toolbar_row_a.addWidget(self._toolbar_section_actions)
-
         main_layout.addWidget(toolbar_frame)
 
         # ---------------------------------------------------------------------
@@ -682,13 +665,24 @@ class MainWindow(QMainWindow):
         # Right Column: High/Low Metrics & Sync Info
         info_box = QVBoxLayout()
         info_box.setAlignment(Qt.AlignRight)
+
+        high_low_row = QHBoxLayout()
+        high_low_row.setSpacing(8)
+        high_low_row.setAlignment(Qt.AlignRight)
         self.lbl_high_low = QLabel("High: -- | Low: --", right_panel)
         self.lbl_high_low.setStyleSheet("color: #8b90a0; font-size: 9pt; font-weight: bold;")
+        high_low_row.addWidget(self.lbl_high_low)
+
+        self.btn_reset_view = QPushButton("Reset Zoom", right_panel)
+        self.btn_reset_view.setToolTip("Reset chart zoom and pan")
+        self.btn_reset_view.clicked.connect(self._on_reset_view)
+        high_low_row.addWidget(self.btn_reset_view)
+        info_box.addLayout(high_low_row)
+
         self.lbl_info_range = QLabel("Range: 1 Year", right_panel)
         self.lbl_info_range.setStyleSheet("color: #8b90a0; font-size: 8.25pt;")
         self.lbl_last_sync = QLabel("Last Sync: Never", right_panel)
         self.lbl_last_sync.setStyleSheet("color: #8b90a0; font-size: 8.25pt;")
-        info_box.addWidget(self.lbl_high_low)
         info_box.addWidget(self.lbl_info_range)
         info_box.addWidget(self.lbl_last_sync)
         self.header_card.addLayout(info_box)
@@ -775,7 +769,6 @@ class MainWindow(QMainWindow):
             self._toolbar_section_updates,
             self._toolbar_section_filter,
             self._toolbar_section_range,
-            self._toolbar_section_actions,
         )
         spacing = self._toolbar_row_a.spacing()
         single_row_width = sum(
@@ -801,10 +794,8 @@ class MainWindow(QMainWindow):
         if stacked:
             row_b.addWidget(self._toolbar_section_range)
             row_b.addStretch()
-            row_b.addWidget(self._toolbar_section_actions)
         else:
             row_a.addWidget(self._toolbar_section_range)
-            row_a.addWidget(self._toolbar_section_actions)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

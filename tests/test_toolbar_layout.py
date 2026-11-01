@@ -126,9 +126,8 @@ class TestToolbarLayout(unittest.TestCase):
                 self.window._toolbar_section_updates,
                 self.window._toolbar_section_filter,
                 self.window._toolbar_section_range,
-                self.window._toolbar_section_actions,
             )
-        ) + self.window._toolbar_row_a.spacing() * 3
+        ) + self.window._toolbar_row_a.spacing() * 2
         self.window.resize(needed + margins.left() + margins.right() + 80, 780)
         self.app.processEvents()
         self.assertFalse(self.window._toolbar_stacked)
@@ -141,9 +140,19 @@ class TestToolbarLayout(unittest.TestCase):
             self.window._toolbar_section_updates,
             self.window._toolbar_section_filter,
             self.window._toolbar_section_range,
-            self.window._toolbar_section_actions,
         ):
             self.assertIsNotNone(section)
+
+    def test_reset_zoom_next_to_high_low_label(self):
+        self.assertIsNotNone(self.window.btn_reset_view)
+        self.assertIsNotNone(self.window.lbl_high_low)
+        self.assertEqual(
+            self.window.btn_reset_view.parent(), self.window.lbl_high_low.parent()
+        )
+        self.assertGreater(
+            self.window.btn_reset_view.pos().x(),
+            self.window.lbl_high_low.pos().x(),
+        )
 
     def test_scaled_window_width_is_moderate(self):
         import os
